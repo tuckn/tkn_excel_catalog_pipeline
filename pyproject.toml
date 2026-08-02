@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tkn-excel-catalog-pipeline"
+version = "0.1.0"
+description = "Synchronize Excel workbook metadata with Markdown catalog notes."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Tuckn" }]
+dependencies = ["PyYAML>=6.0.2"]
+
+[project.scripts]
+excel-catalog = "excel_catalog_pipeline.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.17.0",
+  "pytest>=8.4.0",
+  "ruff>=0.12.0",
+  "types-PyYAML>=6.0.12.20250516",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/excel_catalog_pipeline"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["excel_catalog_pipeline"]

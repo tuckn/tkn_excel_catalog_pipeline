@@ -1,0 +1,19 @@
+schema_version: 1
+
+sources:
+  - id: personal-excel
+    path: 'C:\path\to\excel-workbooks'
+    include:
+      - "**/*.xlsx"
+      - "**/*.xlsm"
+    notes:
+      root: 'C:\path\to\obsidian-vault\reference\entities\files\Excel'
+      profile: tkn-obsidian-v1
+      rename_adapter: report-only
+
+sync:
+  pull_preserves_user_metadata: true
+  delete_missing_notes: false
+  delete_missing_workbooks: false
+  allow_source_rename: false
+  max_extracted_text_chars: 12000
