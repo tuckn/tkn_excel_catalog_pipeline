@@ -176,6 +176,12 @@ Proxy notes are named `<workbook-name>.xlsx.md` or `<workbook-name>.xlsm.md`.
 Generated body sections are enclosed by `excel-catalog` markers. Unknown Frontmatter
 fields and text outside those markers are preserved.
 
+The generated body structure, headings, section order, and default description are
+owned by the application profile at
+`src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md`. It is shipped
+as a package resource and is not a user configuration file. Python owns resource
+loading and validation, dynamic workbook content, and safe marker replacement.
+
 ## Conflict and rename behavior
 
 Synchronization uses field-level three-way comparison between the previous base,

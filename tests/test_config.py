@@ -53,6 +53,27 @@ def test_unknown_key_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         load_config(explicit=path, cwd=tmp_path)
 
 
+def test_unknown_note_profile_is_rejected_in_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "bad-profile.yaml"
+    path.write_text(
+        r"""schema_version: 1
+sources:
+  - id: example
+    path: 'C:\path\to\source'
+    notes:
+      root: 'C:\path\to\notes'
+      profile: missing-profile
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "missing")
+
+    with pytest.raises(ConfigError, match="Unknown note profile"):
+        load_config(explicit=path, cwd=tmp_path)
+
+
 def test_packaged_template_matches_repository_example() -> None:
     repository_template = Path(".tkn/config.example.yaml").read_text(encoding="utf-8")
     assert config_template_text() == repository_template

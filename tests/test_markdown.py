@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from excel_catalog_pipeline.adapters.markdown import (
+    NoteError,
     metadata_to_nouns,
     note_metadata,
     read_note,
@@ -10,6 +13,7 @@ from excel_catalog_pipeline.adapters.markdown import (
 )
 from excel_catalog_pipeline.adapters.ooxml import inspect_workbook
 from excel_catalog_pipeline.models import SourceConfig
+from excel_catalog_pipeline.note_resources import load_note_template
 
 from .helpers import create_workbook
 
@@ -56,3 +60,38 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
     assert "<!-- excel-catalog:begin workbook-path -->" in updated.body
     assert str(workbook_path) in updated.body
     assert render_note(workbook, source, existing=updated, touch_updated=False) == rendered
+
+
+def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
+    workbook_path = create_workbook(tmp_path / "book.xlsx")
+    source = config(tmp_path)
+    workbook = inspect_workbook(workbook_path, source, max_text_chars=1000)
+
+    template = load_note_template(source.profile)
+    rendered = render_note(workbook, source)
+
+    assert template.managed_names == (
+        "workbook-path",
+        "workbook-map",
+        "extracted-text",
+        "excel-metadata",
+    )
+    assert "Excel workbookの検索・管理用代理ノート。" in template.text
+    assert [rendered.index(name) for name in template.managed_names] == sorted(
+        rendered.index(name) for name in template.managed_names
+    )
+
+
+def test_unknown_note_profile_is_rejected_when_rendering(tmp_path: Path) -> None:
+    workbook_path = create_workbook(tmp_path / "book.xlsx")
+    source = SourceConfig(
+        id="example",
+        path=tmp_path,
+        include=("**/*.xlsx",),
+        note_root=tmp_path / "notes",
+        profile="missing-profile",
+    )
+    workbook = inspect_workbook(workbook_path, source, max_text_chars=1000)
+
+    with pytest.raises(NoteError, match="Unknown note profile"):
+        render_note(workbook, source)

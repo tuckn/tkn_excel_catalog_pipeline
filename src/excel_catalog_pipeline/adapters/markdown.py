@@ -14,8 +14,13 @@ from typing import Any
 import yaml
 
 from ..models import ProxyNote, SourceConfig, WorkbookInfo
+from ..note_resources import (
+    ManagedBlock,
+    NoteResourceError,
+    load_note_template,
+    managed_blocks,
+)
 
-MANAGED_SECTIONS = ("workbook-path", "workbook-map", "extracted-text", "excel-metadata")
 WINDOWS_PATH_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
 
 
@@ -152,33 +157,21 @@ def _marker_pattern(name: str) -> re.Pattern[str]:
     )
 
 
-def _managed_block(name: str, heading: str, content: str) -> str:
-    return (
-        f"<!-- excel-catalog:begin {name} -->\n"
-        f"## {heading}\n\n{content.rstrip()}\n"
-        f"<!-- excel-catalog:end {name} -->"
-    )
-
-
-def _replace_managed(body: str, name: str, heading: str, content: str) -> str:
-    block = _managed_block(name, heading, content)
-    marker = _marker_pattern(name)
+def _replace_managed(body: str, block: ManagedBlock) -> str:
+    marker = _marker_pattern(block.name)
     if marker.search(body):
-        return marker.sub(lambda _match: block, body, count=1)
-    legacy_headings = {
-        "workbook-path": r"Workbook Path|ファイルを開く",
-        "workbook-map": r"Workbook Map",
-        "extracted-text": r"抽出テキスト",
-        "excel-metadata": r"Excel Metadata",
-    }
+        return marker.sub(lambda _match: block.text, body, count=1)
+    headings = [re.escape(block.heading)]
+    if block.name == "workbook-path":
+        headings.append(re.escape("ファイルを開く"))
     legacy = re.compile(
-        rf"^##\s+(?:{legacy_headings[name]})\s*$\r?\n.*?(?=^##\s+|\Z)",
+        rf"^##\s+(?:{'|'.join(headings)})\s*$\r?\n.*?(?=^##\s+|\Z)",
         re.MULTILINE | re.DOTALL,
     )
     if legacy.search(body):
-        return legacy.sub(lambda _match: block + "\n\n", body, count=1)
+        return legacy.sub(lambda _match: block.text + "\n\n", body, count=1)
     separator = "" if not body or body.endswith("\n\n") else "\n\n"
-    return body + separator + block + "\n"
+    return body + separator + block.text + "\n"
 
 
 def _render_map(workbook: WorkbookInfo) -> str:
@@ -255,22 +248,28 @@ def render_note(
         frontmatter["updated"] = timestamp
     frontmatter.setdefault("noteId", str(uuid.uuid4()))
 
+    try:
+        template = load_note_template(source.profile)
+        rendered_template = template.render(
+            {
+                "title": str(frontmatter["title"]),
+                "description": str(frontmatter["description"]),
+                "workbook_path": f"`{workbook.path}`",
+                "workbook_map": _render_map(workbook),
+                "extracted_text": _render_text(workbook),
+                "excel_metadata": _render_excel_metadata(workbook),
+            }
+        )
+        sections = managed_blocks(rendered_template, template)
+    except NoteResourceError as exc:
+        raise NoteError(str(exc)) from exc
+
     if existing:
         body = existing.body
+        for section in sections:
+            body = _replace_managed(body, section)
     else:
-        body = (
-            f"# {frontmatter['title']}\n\n"
-            "## 概要\n\n"
-            f"{frontmatter['description'] or 'Excel workbookの検索・管理用代理ノート。'}\n"
-        )
-    sections = (
-        ("workbook-path", "Workbook Path", f"`{workbook.path}`"),
-        ("workbook-map", "Workbook Map", _render_map(workbook)),
-        ("extracted-text", "抽出テキスト", _render_text(workbook)),
-        ("excel-metadata", "Excel Metadata", _render_excel_metadata(workbook)),
-    )
-    for name, heading, content in sections:
-        body = _replace_managed(body, name, heading, content)
+        body = rendered_template.rstrip() + "\n"
     yaml_text = yaml.safe_dump(
         frontmatter,
         allow_unicode=True,

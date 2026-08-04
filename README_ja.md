@@ -173,6 +173,11 @@ excel-catalog adopt --write-excel
 本文sectionは`excel-catalog` markerで囲みます。未知のFrontmatter fieldとmarker外の
 手書き本文は保持します。
 
+生成本文の構造、見出し、section順、default descriptionは、application-owned profile
+`src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md`をsource of truthとします。
+このfileはpackage resourceとして配布し、user設定にはしません。Pythonはresourceの読込と
+validation、動的なworkbook内容の生成、安全なmarker置換を担当します。
+
 ## conflictとrename
 
 前回一致時のbase、現在のworkbook、現在のnoteをfield単位で三方向比較します。双方が

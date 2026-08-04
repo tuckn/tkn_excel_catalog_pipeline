@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from .models import AppConfig, SourceConfig, SyncConfig
+from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
 SCHEMA_VERSION = 1
@@ -186,13 +187,20 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         if not isinstance(notes, dict):
             raise ConfigError(f"sources[{index}].notes must be a mapping")
         _reject_unknown(notes, NOTES_KEYS, f"sources[{index}].notes")
+        profile = notes.get("profile", "tkn-obsidian-v1")
+        if not isinstance(profile, str) or not profile.strip():
+            raise ConfigError(f"sources[{index}].notes.profile must be a non-empty string")
+        try:
+            load_note_template(profile)
+        except NoteResourceError as exc:
+            raise ConfigError(f"sources[{index}].notes.profile: {exc}") from exc
         sources.append(
             SourceConfig(
                 id=source_id,
                 path=_path_value(item.get("path"), f"sources[{index}].path"),
                 include=tuple(include),
                 note_root=_path_value(notes.get("root"), f"sources[{index}].notes.root"),
-                profile=str(notes.get("profile", "tkn-obsidian-v1")),
+                profile=profile,
                 rename_adapter=str(notes.get("rename_adapter", "report-only")),
             )
         )
