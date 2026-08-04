@@ -12,7 +12,7 @@ from typing import Any
 
 from . import __version__
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
-from .models import Action
+from .models import Action, SourceConfig
 from .pipeline import run_adopt, run_pull, run_push, run_status
 from .reports import write_report
 from .state import StateError
@@ -162,6 +162,30 @@ def _one_line(value: str) -> str:
     return " ".join(value.split()) or "-"
 
 
+def _yaml_single_quoted(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _log_source_configuration(
+    logger: logging.Logger, sources: tuple[SourceConfig, ...]
+) -> None:
+    lines: list[str] = []
+    for source in sources:
+        lines.extend(
+            [
+                f"  - id: {source.id}",
+                f"    path: {_yaml_single_quoted(str(source.path))}",
+                "    include:",
+                *(f"      - {json.dumps(pattern)}" for pattern in source.include),
+                "    notes:",
+                f"      root: {_yaml_single_quoted(str(source.note_root))}",
+                f"      profile: {source.profile}",
+                f"      rename_adapter: {source.rename_adapter}",
+            ]
+        )
+    logger.info("Selected source configuration:\n%s", "\n".join(lines))
+
+
 def _log_push_action(logger: logging.Logger, action: Action) -> None:
     if action.status == "unchanged":
         return
@@ -179,9 +203,14 @@ def _log_push_action(logger: logging.Logger, action: Action) -> None:
         level = logging.WARNING
     else:
         level = logging.INFO
-    fields = [f"sourcePath={_one_line(action.source_path)}"]
-    if not action.source_path and action.note_path:
-        fields.append(f"notePath={_one_line(action.note_path)}")
+    file_name = Path(action.note_path).name if action.note_path else Path(action.source_path).name
+    if action.status == "missing-source":
+        fields = [_one_line(file_name)]
+    else:
+        fields = [
+            f"fileName={_one_line(file_name)}",
+            f"sourcePath={_one_line(action.source_path)}",
+        ]
     fields.append(f"message={_one_line(action.message)}")
     logger.log(level, "[%s] %s", action.status, " | ".join(fields))
 
@@ -223,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
             len(sources),
             ", ".join(source.id for source in sources),
         )
+        if args.command == "push":
+            _log_source_configuration(logger, sources)
         backup_dir: Path | None = None
         if args.command == "status":
             actions = run_status(config, sources)
@@ -245,11 +276,8 @@ def main(argv: list[str] | None = None) -> int:
                 allow_rename=args.allow_rename,
                 preference=_preference(args),
                 note_filters=tuple(args.note),
-                on_written=lambda action: _log_push_action(logger, action),
+                on_action=lambda action: _log_push_action(logger, action),
             )
-            for action in actions:
-                if action.status != "written":
-                    _log_push_action(logger, action)
             write_enabled = bool(args.write_excel)
         elif args.command == "adopt":
             actions, backup_dir = run_adopt(

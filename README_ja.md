@@ -55,7 +55,7 @@ repositoryを更新した後は、同じcommandを再実行して変更を反映
 
 まずuser共通の設定fileを生成し、例示pathを書き換えます。
 
-```powershell
+```console
 excel-catalog config init
 ```
 
@@ -94,7 +94,7 @@ Windows pathはYAMLのsingle quoteで囲む方法を推奨します。例:
 後の設定が前を上書きし、個別CLI optionが最優先です。相対pathはcurrent working
 directory基準です。実行fileを作らず解決結果を確認できます。
 
-```powershell
+```console
 excel-catalog config show
 excel-catalog --config C:\path\to\config.yaml config show
 ```
@@ -106,34 +106,55 @@ source IDは一意である必要があります。schemaは複数rootを表現�
 
 inventory確認:
 
-```powershell
+```console
 excel-catalog status
 ```
 
 ExcelからMarkdownへの変更を確認し、review後に適用:
 
-```powershell
+```console
 excel-catalog pull
 excel-catalog pull --write-notes
 ```
 
 MarkdownからExcelへの変更を確認し、review後にbackup付きで適用:
 
-```powershell
+```console
 excel-catalog push
 excel-catalog push --write-excel
 ```
 
+`push`のfile別status:
+
+| status | 意味 |
+| ------ | ---- |
+| `unchanged` | workbookと代理ノートに同期対象の差分がありません。個別ログには表示せず、summaryに総数だけを表示します。 |
+| `would-write` | 代理ノート側の変更をworkbookへ書き込む予定です。dry-runのため、まだ書き込んでいません。 |
+| `written` | workbookへの書き込みと検証が完了しました。 |
+| `missing-source` | 代理ノートに一意に対応するworkbookが見つかりません。workbookは変更しません。 |
+| `pull-required` | workbook側に取り込むべき変更があります。`push`では変更せず、`pull`で確認します。 |
+| `conflict` | base、workbook、代理ノートの比較で競合しました。内容を確認し、必要な場合だけ`--prefer-note`または`--prefer-source`を指定します。 |
+| `duplicate-id` | 同じ`TknExcelCatalogId`を持つworkbookが複数あり、一意に対応付けできません。 |
+| `rename-required` | rename要求がありますが、明示許可または設定されたadapterでの処理が必要です。 |
+| `rename-error` | rename先の名前、衝突、または関連fileの処理で問題が発生しました。 |
+| `read-error` | workbookまたは代理ノートの検出・読み取りに失敗しました。 |
+| `write-error` | workbookへの書き込みまたは書き込み後の検証に失敗しました。可能な範囲でrollbackします。 |
+
+`sourcePath`は、開始時に表示される選択sourceの`path`を基準にした相対パスです。
+root pathを各行で繰り返さず、reportをsourceの移動に対して扱いやすくするためです。
+`missing-source`は対応するworkbook自体がないため`sourcePath`を持たず、ログには代理ノートの
+file nameだけを表示します。
+
 特定ノートだけを対象にする例:
 
-```powershell
+```console
 excel-catalog push --note example.xlsx.md
 excel-catalog push --note example.xlsx.md --write-excel
 ```
 
 stable workbook IDの不足を確認し、明示的にcustom propertyへ付与:
 
-```powershell
+```console
 excel-catalog adopt
 excel-catalog adopt --write-excel
 ```
@@ -199,9 +220,11 @@ MVP対象外です。cell text抽出は検索補助であり、内容の完全�
 ## consoleと終了code
 
 人向け進捗はstderrへ`[LEVEL] message`として出します。`push`では、処理対象のsource ID、
-`unchanged`以外のfileごとの結果、indent付きの最終summaryを表示します。`unchanged`は
-個別表示せず、最終summaryに総数だけを表示します。stdoutには従来どおりcompact JSONを
-1件だけ出します。`--quiet`、`--verbose`、`--no-color`を提供し、`NO_COLOR`も尊重します。
+workbook path、include pattern、notes設定を最初に表示します。その後、`unchanged`以外の
+fileごとの結果を確定するたびに、noteのfile nameと相対`sourcePath`を表示し、最後に
+indent付きのsummaryを表示します。`unchanged`は個別表示せず、最終summaryに総数だけを表示します。stdoutには
+従来どおりcompact JSONを1件だけ出します。`--quiet`、`--verbose`、`--no-color`を提供し、
+`NO_COLOR`も尊重します。
 
 - `0`: 成功
 - `1`: 実行・validation・partial write error
@@ -210,7 +233,7 @@ MVP対象外です。cell text抽出は検索補助であり、内容の完全�
 
 ## 開発と検証
 
-```powershell
+```console
 uv sync --locked
 uv run pytest
 uv run ruff check .

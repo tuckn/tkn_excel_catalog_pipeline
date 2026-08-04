@@ -470,6 +470,7 @@ def run_push(
     allow_rename: bool,
     preference: str | None,
     note_filters: tuple[str, ...],
+    on_action: Callable[[Action], None] | None = None,
     on_written: Callable[[Action], None] | None = None,
 ) -> tuple[list[Action], Path | None]:
     state_file = state_path()
@@ -480,6 +481,13 @@ def run_push(
     backup_dir = state_root() / "backups" / datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%z")
     used_backup = False
 
+    def record(action: Action) -> None:
+        actions.append(action)
+        if on_action is not None:
+            on_action(action)
+        if action.status == "written" and on_written is not None:
+            on_written(action)
+
     for source in sources:
         try:
             workbooks = discover_workbooks(source, max_text_chars=1)
@@ -489,13 +497,13 @@ def run_push(
                 if _note_selected(note, note_filters)
             ]
         except (WorkbookError, NoteError, OSError) as exc:
-            actions.append(Action(status="read-error", source_root_id=source.id, message=str(exc)))
+            record(Action(status="read-error", source_root_id=source.id, message=str(exc)))
             continue
         duplicates = _duplicate_ids(workbooks)
         for note in notes:
             workbook = _find_workbook_for_note(note, workbooks)
             if workbook is None:
-                actions.append(
+                record(
                     Action(
                         status="missing-source",
                         source_root_id=source.id,
@@ -505,7 +513,7 @@ def run_push(
                 )
                 continue
             if workbook.workbook_id and workbook.workbook_id in duplicates:
-                actions.append(
+                record(
                     Action(
                         status="duplicate-id",
                         source_root_id=source.id,
@@ -524,7 +532,7 @@ def run_push(
                     field for field in source_values if source_values[field] != note_values[field]
                 ]
                 if differing and preference != "note":
-                    actions.append(
+                    record(
                         Action(
                             status="conflict",
                             source_root_id=source.id,
@@ -546,7 +554,7 @@ def run_push(
             decisions = compare_metadata(base, source_values, note_values)
             conflicts = direction_fields(decisions, "conflict")
             if conflicts and preference is None:
-                actions.append(
+                record(
                     Action(
                         status="conflict",
                         source_root_id=source.id,
@@ -564,7 +572,7 @@ def run_push(
                 "sourceFileName" in conflicts and preference == "note"
             )
             if rename_requested and not allow_rename:
-                actions.append(
+                record(
                     Action(
                         status="rename-required",
                         source_root_id=source.id,
@@ -582,7 +590,7 @@ def run_push(
                         workbook.path, note_values["sourceFileName"]
                     )
                 except RenameError as exc:
-                    actions.append(
+                    record(
                         Action(
                             status="rename-error",
                             source_root_id=source.id,
@@ -593,7 +601,7 @@ def run_push(
                     )
                     continue
                 if source.rename_adapter != "filesystem":
-                    actions.append(
+                    record(
                         Action(
                             status="rename-required",
                             source_root_id=source.id,
@@ -611,7 +619,7 @@ def run_push(
                 if collisions or (
                     desired_note.exists() and desired_note.resolve() != note.path.resolve()
                 ):
-                    actions.append(
+                    record(
                         Action(
                             status="rename-error",
                             source_root_id=source.id,
@@ -630,7 +638,7 @@ def run_push(
                     )
                     replace_entry(state, old_key=old_key, workbook=workbook, entry=entry_value)
                     state_changed = True
-                actions.append(
+                record(
                     Action(
                         status=status,
                         source_root_id=source.id,
@@ -737,7 +745,7 @@ def run_push(
                     message = str(exc)
                     if rollback_errors:
                         message += " | " + " | ".join(rollback_errors)
-                    actions.append(
+                    record(
                         Action(
                             status="write-error",
                             source_root_id=source.id,
@@ -758,9 +766,7 @@ def run_push(
                 changed_fields=changed_fields,
                 details={"backups": backup_paths},
             )
-            actions.append(action)
-            if status == "written" and on_written is not None:
-                on_written(action)
+            record(action)
     if write_excel and state_changed:
         save_state(state_file, state)
     return actions, backup_dir if used_backup else None

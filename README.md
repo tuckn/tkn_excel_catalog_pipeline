@@ -55,7 +55,7 @@ command again after `git pull` or another repository update.
 
 Create the user-wide configuration, then edit its example paths:
 
-```powershell
+```console
 excel-catalog config init
 ```
 
@@ -96,7 +96,7 @@ Later files override earlier files. Individual command options have final preced
 Relative paths are resolved from the current working directory. Inspect the effective
 configuration without creating runtime files:
 
-```powershell
+```console
 excel-catalog config show
 excel-catalog --config C:\path\to\config.yaml config show
 ```
@@ -108,27 +108,48 @@ limit a run to one root.
 
 Inventory configured workbooks and proxy notes:
 
-```powershell
+```console
 excel-catalog status
 ```
 
 Plan Excel-to-Markdown changes, then apply reviewed note writes:
 
-```powershell
+```console
 excel-catalog pull
 excel-catalog pull --write-notes
 ```
 
 Plan Markdown-to-Excel metadata changes, then apply reviewed workbook writes:
 
-```powershell
+```console
 excel-catalog push
 excel-catalog push --write-excel
 ```
 
+Per-file `push` statuses:
+
+| Status | Meaning |
+| ------ | ------- |
+| `unchanged` | The workbook and proxy note have no synchronized differences. Individual logs omit these files; the summary reports only the total. |
+| `would-write` | Proxy-note changes are planned for the workbook. Dry-run mode has not written them yet. |
+| `written` | The workbook write and post-write verification completed. |
+| `missing-source` | No unique workbook matches the proxy note. No workbook is modified. |
+| `pull-required` | The workbook has changes that should be reviewed through `pull`; `push` does not modify it. |
+| `conflict` | The base, workbook, and proxy note comparison found a conflict. Review it before using `--prefer-note` or `--prefer-source`. |
+| `duplicate-id` | More than one workbook has the same `TknExcelCatalogId`, so matching is ambiguous. |
+| `rename-required` | A rename was requested but requires explicit permission or handling by the configured adapter. |
+| `rename-error` | The rename target, collision checks, or related file operation failed. |
+| `read-error` | Workbook or proxy-note discovery or reading failed. |
+| `write-error` | The workbook write or post-write verification failed. The command rolls back where possible. |
+
+`sourcePath` is relative to the selected source `path` shown at startup. This avoids
+repeating the source root on every line and keeps reports usable if the source root moves.
+A `missing-source` result has no matching workbook and therefore no `sourcePath`; its log
+shows only the proxy-note filename.
+
 Limit a push to one proxy note:
 
-```powershell
+```console
 excel-catalog push --note example.xlsx.md
 excel-catalog push --note example.xlsx.md --write-excel
 ```
@@ -136,7 +157,7 @@ excel-catalog push --note example.xlsx.md --write-excel
 Assign missing stable workbook IDs. This changes the OOXML custom properties only in
 write mode and creates a backup first:
 
-```powershell
+```console
 excel-catalog adopt
 excel-catalog adopt --write-excel
 ```
@@ -205,10 +226,12 @@ search aid, not a complete workbook representation.
 ## Console and exit codes
 
 Human-readable progress goes to stderr as `[LEVEL] message`. For `push`, this includes
-the selected source IDs, one result line per non-unchanged file, and an indented final
-summary; unchanged files appear only as a count in that summary. One compact JSON
-result still goes to stdout. Use `--quiet`, `--verbose`, or `--no-color`; `NO_COLOR`
-is honored.
+the selected source configuration (`id`, workbook path, include patterns, and note
+settings), one result line as each non-unchanged file result is determined, and an
+indented final summary. Per-file lines use the note filename and relative `sourcePath`
+instead of repeating the full note path. Unchanged files appear only as a count in the summary.
+One compact JSON result still goes to stdout. Use `--quiet`, `--verbose`, or
+`--no-color`; `NO_COLOR` is honored.
 
 - `0`: success
 - `1`: execution, validation, or partial write error
@@ -217,7 +240,7 @@ is honored.
 
 ## Development
 
-```powershell
+```console
 uv sync --locked
 uv run pytest
 uv run ruff check .

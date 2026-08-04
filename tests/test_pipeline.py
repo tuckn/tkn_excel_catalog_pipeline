@@ -71,6 +71,7 @@ def test_push_detects_note_only_change_and_writes_backup(monkeypatch, tmp_path: 
         note_filters=(),
     )
     assert [action.status for action in dry] == ["would-write"]
+    observed_actions = []
     written_actions = []
     applied, backup = run_push(
         config,
@@ -79,9 +80,11 @@ def test_push_detects_note_only_change_and_writes_backup(monkeypatch, tmp_path: 
         allow_rename=False,
         preference=None,
         note_filters=(),
+        on_action=observed_actions.append,
         on_written=written_actions.append,
     )
     assert [action.status for action in applied] == ["written"]
+    assert observed_actions == applied
     assert written_actions == applied
     assert backup is not None and any(backup.iterdir())
     from excel_catalog_pipeline.adapters.ooxml import inspect_workbook
@@ -90,6 +93,48 @@ def test_push_detects_note_only_change_and_writes_backup(monkeypatch, tmp_path: 
         inspect_workbook(workbook_path, config.sources[0], max_text_chars=1).core["title"]
         == "Human title"
     )
+
+
+def test_push_preserves_repeated_title_whitespace(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    workbook_path = create_workbook(tmp_path / "workbooks" / "book.xlsx")
+    config = app_config(tmp_path)
+    state = tmp_path / "state.json"
+    backup_root = tmp_path / "application-state"
+    monkeypatch.setattr(pipeline_module, "state_path", lambda: state)
+    monkeypatch.setattr(pipeline_module, "state_root", lambda: backup_root)
+    run_pull(config, config.sources, write_notes=True, preference=None)
+    note_path = tmp_path / "notes" / "book.xlsx.md"
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8").replace(
+            "title: Example title", 'title: "Human  title"'
+        ),
+        encoding="utf-8",
+    )
+
+    actions, _ = run_push(
+        config,
+        config.sources,
+        write_excel=True,
+        allow_rename=False,
+        preference=None,
+        note_filters=(),
+    )
+    assert [action.status for action in actions] == ["written"]
+    from excel_catalog_pipeline.adapters.ooxml import inspect_workbook
+
+    assert (
+        inspect_workbook(workbook_path, config.sources[0], max_text_chars=1).core["title"]
+        == "Human  title"
+    )
+    again, _ = run_push(
+        config,
+        config.sources,
+        write_excel=False,
+        allow_rename=False,
+        preference=None,
+        note_filters=(),
+    )
+    assert [action.status for action in again] == ["unchanged"]
 
 
 def test_source_rename_is_detected_by_stable_id(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

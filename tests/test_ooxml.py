@@ -57,6 +57,31 @@ def test_write_preserves_vba_and_unrelated_entries(tmp_path: Path) -> None:
         assert after.testzip() is None
 
 
+def test_core_metadata_preserves_repeated_whitespace(tmp_path: Path) -> None:
+    original_title = "Node.js  Promise result"
+    original_description = "  Leading  and  repeated spaces  "
+    path = create_workbook(
+        tmp_path / "book.xlsx",
+        title=original_title,
+        description=original_description,
+    )
+    info = inspect_workbook(path, source_config(tmp_path), max_text_chars=1)
+    assert info.core["title"] == original_title
+    assert info.core["description"] == original_description
+
+    updated_title = "Updated  title"
+    updated_description = "  Updated  description  text  "
+    write_properties(
+        path,
+        core={"title": updated_title, "description": updated_description},
+        backup_dir=tmp_path / "backups",
+    )
+    with zipfile.ZipFile(path) as archive:
+        properties = read_core_properties(archive)
+    assert properties["title"] == updated_title
+    assert properties["description"] == updated_description
+
+
 def test_failed_write_leaves_source_unchanged(tmp_path: Path) -> None:
     path = create_workbook(tmp_path / "book.xlsx")
     before = path.read_bytes()

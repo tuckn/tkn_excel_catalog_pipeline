@@ -106,7 +106,7 @@ def read_core_properties(archive: zipfile.ZipFile) -> dict[str, str]:
     result: dict[str, str] = {}
     for child in root:
         name = local_name(child.tag)
-        value = normalize_space(child.text or "")
+        value = child.text or ""
         if name in supported and value:
             result[name] = value
     return result

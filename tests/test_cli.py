@@ -83,7 +83,7 @@ sources:
         encoding="utf-8",
     )
 
-    def fake_run_push(*args, on_written, **kwargs):  # type: ignore[no-untyped-def]
+    def fake_run_push(*args, on_action, **kwargs):  # type: ignore[no-untyped-def]
         actions = [
             Action(status="written", source_root_id="example", source_path="one.xlsx"),
             Action(status="unchanged", source_root_id="example", source_path="two.xlsx"),
@@ -108,8 +108,7 @@ sources:
             ),
         ]
         for action in actions:
-            if action.status == "written":
-                on_written(action)
+            on_action(action)
         return actions, None
 
     monkeypatch.setattr(cli_module, "run_push", fake_run_push)
@@ -129,19 +128,32 @@ sources:
     assert result == 2
     assert captured.out.count("\n") == 1
     assert "[INFO] Running push for 1 configured source(s): example." in captured.err
-    assert "[SUCCESS] [written] sourcePath=one.xlsx | message=-" in captured.err
+    assert "[INFO] Selected source configuration:\n  - id: example" in captured.err
+    assert f"    path: '{workbooks.resolve()}'" in captured.err
+    assert '      - "**/*.xlsx"' in captured.err
+    assert f"      root: '{notes.resolve()}'" in captured.err
+    assert "      profile: tkn-obsidian-v1" in captured.err
+    assert "      rename_adapter: report-only" in captured.err
     assert (
-        "[INFO] [would-write] sourcePath=nested/three.xlsx | message=Metadata differs."
+        "[SUCCESS] [written] fileName=one.xlsx | sourcePath=one.xlsx | message=-"
         in captured.err
     )
     assert (
-        f"[WARNING] [missing-source] sourcePath=- | notePath={notes / 'missing.xlsx.md'} "
-        "| message=No unique workbook matches this note."
-    ) in captured.err
+        "[INFO] [would-write] fileName=three.xlsx | sourcePath=nested/three.xlsx | "
+        "message=Metadata differs."
+        in captured.err
+    )
     assert (
-        "[WARNING] [conflict] sourcePath=conflict.xlsx | "
+        "[WARNING] [missing-source] missing.xlsx.md | "
+        "message=No unique workbook matches this note."
+    ) in captured.err
+    assert "[missing-source] fileName=" not in captured.err
+    assert "[missing-source] sourcePath=-" not in captured.err
+    assert (
+        "[WARNING] [conflict] fileName=conflict.xlsx | sourcePath=conflict.xlsx | "
         "message=Source and note changed differently from the base state."
     ) in captured.err
+    assert str(notes / "missing.xlsx.md") not in captured.err
     assert "two.xlsx" not in captured.err
     assert "[INFO] Summary:\n{" in captured.err
     assert '  "statusCounts": {' in captured.err
