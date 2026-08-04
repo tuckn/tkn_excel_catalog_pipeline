@@ -204,8 +204,11 @@ search aid, not a complete workbook representation.
 
 ## Console and exit codes
 
-Human-readable progress goes to stderr as `[LEVEL] message`. One compact JSON result
-goes to stdout. Use `--quiet`, `--verbose`, or `--no-color`; `NO_COLOR` is honored.
+Human-readable progress goes to stderr as `[LEVEL] message`. For `push`, this includes
+the selected source IDs, one result line per non-unchanged file, and an indented final
+summary; unchanged files appear only as a count in that summary. One compact JSON
+result still goes to stdout. Use `--quiet`, `--verbose`, or `--no-color`; `NO_COLOR`
+is honored.
 
 - `0`: success
 - `1`: execution, validation, or partial write error

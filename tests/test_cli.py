@@ -65,7 +65,7 @@ sources:
     assert not notes.exists()
 
 
-def test_cli_push_logs_each_written_workbook_as_success(
+def test_cli_push_logs_non_unchanged_files_and_readable_summary(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:  # type: ignore[no-untyped-def]
     workbooks = tmp_path / "workbooks"
@@ -87,7 +87,25 @@ sources:
         actions = [
             Action(status="written", source_root_id="example", source_path="one.xlsx"),
             Action(status="unchanged", source_root_id="example", source_path="two.xlsx"),
-            Action(status="written", source_root_id="example", source_path="nested/three.xlsx"),
+            Action(
+                status="would-write",
+                source_root_id="example",
+                source_path="nested/three.xlsx",
+                message="Metadata differs.",
+            ),
+            Action(
+                status="missing-source",
+                source_root_id="example",
+                note_path=str(notes / "missing.xlsx.md"),
+                message="No unique workbook matches this note.",
+            ),
+            Action(
+                status="conflict",
+                source_root_id="example",
+                source_path="conflict.xlsx",
+                conflict_fields=["title"],
+                message="Source and note changed differently from the base state.",
+            ),
         ]
         for action in actions:
             if action.status == "written":
@@ -107,8 +125,25 @@ sources:
     )
     captured = capsys.readouterr()
 
-    assert result == 0
-    assert captured.err.count("[SUCCESS] Wrote Excel workbook:") == 2
-    assert str(workbooks.resolve() / "one.xlsx") in captured.err
-    assert str(workbooks.resolve() / "nested/three.xlsx") in captured.err
+    payload = json.loads(captured.out)
+    assert result == 2
+    assert captured.out.count("\n") == 1
+    assert "[INFO] Running push for 1 configured source(s): example." in captured.err
+    assert "[SUCCESS] [written] sourcePath=one.xlsx | message=-" in captured.err
+    assert (
+        "[INFO] [would-write] sourcePath=nested/three.xlsx | message=Metadata differs."
+        in captured.err
+    )
+    assert (
+        f"[WARNING] [missing-source] sourcePath=- | notePath={notes / 'missing.xlsx.md'} "
+        "| message=No unique workbook matches this note."
+    ) in captured.err
+    assert (
+        "[WARNING] [conflict] sourcePath=conflict.xlsx | "
+        "message=Source and note changed differently from the base state."
+    ) in captured.err
     assert "two.xlsx" not in captured.err
+    assert "[INFO] Summary:\n{" in captured.err
+    assert '  "statusCounts": {' in captured.err
+    assert '    "unchanged": 1' in captured.err
+    assert payload["statusCounts"]["unchanged"] == 1

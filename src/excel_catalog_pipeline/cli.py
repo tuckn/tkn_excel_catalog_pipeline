@@ -12,7 +12,7 @@ from typing import Any
 
 from . import __version__
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
-from .models import Action, SourceConfig
+from .models import Action
 from .pipeline import run_adopt, run_pull, run_push, run_status
 from .reports import write_report
 from .state import StateError
@@ -158,19 +158,36 @@ def _exit_code(summary: dict[str, Any]) -> int:
     return 0
 
 
-def _log_written_workbook(
-    logger: logging.Logger,
-    sources: tuple[SourceConfig, ...],
-    action: Action,
-) -> None:
-    source_roots = {source.id: source.path for source in sources}
-    source_root = source_roots.get(action.source_root_id)
-    workbook_path = (
-        source_root / action.source_path
-        if source_root is not None and action.source_path
-        else Path(action.source_path)
-    )
-    logger.log(SUCCESS, "Wrote Excel workbook: %s", workbook_path)
+def _one_line(value: str) -> str:
+    return " ".join(value.split()) or "-"
+
+
+def _log_push_action(logger: logging.Logger, action: Action) -> None:
+    if action.status == "unchanged":
+        return
+    if action.status == "written":
+        level = SUCCESS
+    elif action.status.endswith("error"):
+        level = logging.ERROR
+    elif action.conflict_fields or action.status in {
+        "conflict",
+        "duplicate-id",
+        "missing-source",
+        "pull-required",
+        "rename-required",
+    }:
+        level = logging.WARNING
+    else:
+        level = logging.INFO
+    fields = [f"sourcePath={_one_line(action.source_path)}"]
+    if not action.source_path and action.note_path:
+        fields.append(f"notePath={_one_line(action.note_path)}")
+    fields.append(f"message={_one_line(action.message)}")
+    logger.log(level, "[%s] %s", action.status, " | ".join(fields))
+
+
+def _log_readable_summary(logger: logging.Logger, summary: dict[str, Any]) -> None:
+    logger.info("Summary:\n%s", json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -200,7 +217,12 @@ def main(argv: list[str] | None = None) -> int:
         if not sources:
             raise ConfigError("No sources are configured")
         report_root = args.report_dir.expanduser().resolve() if args.report_dir else None
-        logger.info("Running %s for %d configured source(s).", args.command, len(sources))
+        logger.info(
+            "Running %s for %d configured source(s): %s.",
+            args.command,
+            len(sources),
+            ", ".join(source.id for source in sources),
+        )
         backup_dir: Path | None = None
         if args.command == "status":
             actions = run_status(config, sources)
@@ -223,8 +245,11 @@ def main(argv: list[str] | None = None) -> int:
                 allow_rename=args.allow_rename,
                 preference=_preference(args),
                 note_filters=tuple(args.note),
-                on_written=lambda action: _log_written_workbook(logger, sources, action),
+                on_written=lambda action: _log_push_action(logger, action),
             )
+            for action in actions:
+                if action.status != "written":
+                    _log_push_action(logger, action)
             write_enabled = bool(args.write_excel)
         elif args.command == "adopt":
             actions, backup_dir = run_adopt(
@@ -251,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
             logger.error(
                 "%s failed for one or more targets; report: %s", args.command, summary["reportPath"]
             )
+        if args.command == "push":
+            _log_readable_summary(logger, summary)
         _emit(summary)
         return _exit_code(summary)
     except (ConfigError, StateError) as exc:

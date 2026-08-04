@@ -198,8 +198,10 @@ MVP対象外です。cell text抽出は検索補助であり、内容の完全�
 
 ## consoleと終了code
 
-人向け進捗はstderrへ`[LEVEL] message`、最終結果はstdoutへcompact JSONを1件出します。
-`--quiet`、`--verbose`、`--no-color`を提供し、`NO_COLOR`も尊重します。
+人向け進捗はstderrへ`[LEVEL] message`として出します。`push`では、処理対象のsource ID、
+`unchanged`以外のfileごとの結果、indent付きの最終summaryを表示します。`unchanged`は
+個別表示せず、最終summaryに総数だけを表示します。stdoutには従来どおりcompact JSONを
+1件だけ出します。`--quiet`、`--verbose`、`--no-color`を提供し、`NO_COLOR`も尊重します。
 
 - `0`: 成功
 - `1`: 実行・validation・partial write error
