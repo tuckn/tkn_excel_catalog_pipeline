@@ -12,6 +12,7 @@ from typing import Any
 
 from . import __version__
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
+from .models import Action, SourceConfig
 from .pipeline import run_adopt, run_pull, run_push, run_status
 from .reports import write_report
 from .state import StateError
@@ -157,6 +158,21 @@ def _exit_code(summary: dict[str, Any]) -> int:
     return 0
 
 
+def _log_written_workbook(
+    logger: logging.Logger,
+    sources: tuple[SourceConfig, ...],
+    action: Action,
+) -> None:
+    source_roots = {source.id: source.path for source in sources}
+    source_root = source_roots.get(action.source_root_id)
+    workbook_path = (
+        source_root / action.source_path
+        if source_root is not None and action.source_path
+        else Path(action.source_path)
+    )
+    logger.log(SUCCESS, "Wrote Excel workbook: %s", workbook_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -207,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
                 allow_rename=args.allow_rename,
                 preference=_preference(args),
                 note_filters=tuple(args.note),
+                on_written=lambda action: _log_written_workbook(logger, sources, action),
             )
             write_enabled = bool(args.write_excel)
         elif args.command == "adopt":

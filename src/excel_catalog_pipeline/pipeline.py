@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -469,6 +470,7 @@ def run_push(
     allow_rename: bool,
     preference: str | None,
     note_filters: tuple[str, ...],
+    on_written: Callable[[Action], None] | None = None,
 ) -> tuple[list[Action], Path | None]:
     state_file = state_path()
     state = load_state(state_file)
@@ -747,17 +749,18 @@ def run_push(
                         )
                     )
                     continue
-            actions.append(
-                Action(
-                    status=status,
-                    source_root_id=source.id,
-                    source_path=workbook.relative_path,
-                    note_path=str(note.path),
-                    workbook_id=workbook.workbook_id,
-                    changed_fields=changed_fields,
-                    details={"backups": backup_paths},
-                )
+            action = Action(
+                status=status,
+                source_root_id=source.id,
+                source_path=workbook.relative_path,
+                note_path=str(note.path),
+                workbook_id=workbook.workbook_id,
+                changed_fields=changed_fields,
+                details={"backups": backup_paths},
             )
+            actions.append(action)
+            if status == "written" and on_written is not None:
+                on_written(action)
     if write_excel and state_changed:
         save_state(state_file, state)
     return actions, backup_dir if used_backup else None

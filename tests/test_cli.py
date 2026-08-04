@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import excel_catalog_pipeline.cli as cli_module
 import excel_catalog_pipeline.config as config_module
 from excel_catalog_pipeline.cli import main
+from excel_catalog_pipeline.models import Action
 
 from .helpers import create_workbook
 
@@ -61,3 +63,52 @@ sources:
     assert payload["statusCounts"] == {"would-create": 1}
     assert Path(payload["reportPath"], "summary.json").exists()
     assert not notes.exists()
+
+
+def test_cli_push_logs_each_written_workbook_as_success(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    workbooks = tmp_path / "workbooks"
+    notes = tmp_path / "notes"
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f'''schema_version: 1
+sources:
+  - id: example
+    path: "{workbooks.as_posix()}"
+    include: ["**/*.xlsx"]
+    notes:
+      root: "{notes.as_posix()}"
+''',
+        encoding="utf-8",
+    )
+
+    def fake_run_push(*args, on_written, **kwargs):  # type: ignore[no-untyped-def]
+        actions = [
+            Action(status="written", source_root_id="example", source_path="one.xlsx"),
+            Action(status="unchanged", source_root_id="example", source_path="two.xlsx"),
+            Action(status="written", source_root_id="example", source_path="nested/three.xlsx"),
+        ]
+        for action in actions:
+            if action.status == "written":
+                on_written(action)
+        return actions, None
+
+    monkeypatch.setattr(cli_module, "run_push", fake_run_push)
+    result = main(
+        [
+            "--config",
+            str(config),
+            "--report-dir",
+            str(tmp_path / "reports"),
+            "push",
+            "--write-excel",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert captured.err.count("[SUCCESS] Wrote Excel workbook:") == 2
+    assert str(workbooks.resolve() / "one.xlsx") in captured.err
+    assert str(workbooks.resolve() / "nested/three.xlsx") in captured.err
+    assert "two.xlsx" not in captured.err

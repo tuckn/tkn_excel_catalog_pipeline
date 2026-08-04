@@ -71,6 +71,7 @@ def test_push_detects_note_only_change_and_writes_backup(monkeypatch, tmp_path: 
         note_filters=(),
     )
     assert [action.status for action in dry] == ["would-write"]
+    written_actions = []
     applied, backup = run_push(
         config,
         config.sources,
@@ -78,8 +79,10 @@ def test_push_detects_note_only_change_and_writes_backup(monkeypatch, tmp_path: 
         allow_rename=False,
         preference=None,
         note_filters=(),
+        on_written=written_actions.append,
     )
     assert [action.status for action in applied] == ["written"]
+    assert written_actions == applied
     assert backup is not None and any(backup.iterdir())
     from excel_catalog_pipeline.adapters.ooxml import inspect_workbook
 
