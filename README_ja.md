@@ -163,6 +163,7 @@ excel-catalog adopt --write-excel
 
 | Markdown代理ノート | Excel core property            |
 | ------------------ | ------------------------------ |
+| `schemaVersion: "1.0"` | 現行の代理note Frontmatter契約。workbook metadataではない |
 | `title`          | Title                          |
 | `description`    | Comments / description         |
 | `nouns[0]`       | Categories / category          |
@@ -172,8 +173,10 @@ excel-catalog adopt --write-excel
 代理ノート名は`<workbook-name>.xlsx.md`または`<workbook-name>.xlsm.md`です。生成管理する
 本文sectionは`excel-catalog` markerで囲みます。未知のFrontmatter fieldとmarker外の
 手書き本文は保持します。
+`schemaVersion`がないlegacy代理noteも引き続き読めます。review後の明示的なnote書込みで
+現profileのversionを追加し、dry-runではnoteを変更しません。
 
-生成本文の構造、見出し、section順、default descriptionは、application-owned profile
+生成Frontmatter契約と本文構造（`schemaVersion`、見出し、section順、default description）は、application-owned profile
 `src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md`をsource of truthとします。
 このfileはpackage resourceとして配布し、user設定にはしません。Pythonはresourceの読込と
 validation、動的なworkbook内容の生成、安全なmarker置換を担当します。

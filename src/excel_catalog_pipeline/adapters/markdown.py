@@ -222,6 +222,29 @@ def note_filename(workbook: WorkbookInfo) -> str:
     return f"{stem[:150]}{workbook.extension}.md"
 
 
+def _merge_frontmatter(rendered: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
+    """Apply the template contract while preserving unknown fields near their old position."""
+
+    unknown_before: dict[str, list[tuple[str, Any]]] = {}
+    pending: list[tuple[str, Any]] = []
+    for key, value in existing.items():
+        if key == "noun":
+            continue
+        if key in rendered:
+            if pending:
+                unknown_before.setdefault(key, []).extend(pending)
+                pending = []
+        else:
+            pending.append((key, value))
+
+    merged: dict[str, Any] = {}
+    for key, value in rendered.items():
+        merged.update(unknown_before.get(key, ()))
+        merged[key] = value
+    merged.update(pending)
+    return merged
+
+
 def render_note(
     workbook: WorkbookInfo,
     source: SourceConfig,
@@ -232,44 +255,47 @@ def render_note(
 ) -> str:
     timestamp = now_iso()
     values = metadata or workbook.metadata()
-    frontmatter = dict(existing.frontmatter) if existing else {}
-    frontmatter.pop("noun", None)
-    frontmatter["type"] = "Excel"
-    frontmatter["title"] = values["title"] or workbook.path.stem
-    frontmatter["description"] = values["description"]
-    frontmatter["nouns"] = metadata_to_nouns(values["category"], values["keywords"])
-    frontmatter.setdefault("files", [])
-    frontmatter["sourceRoot"] = source.id
-    frontmatter["sourceFileName"] = values["sourceFileName"]
+    existing_frontmatter = dict(existing.frontmatter) if existing else {}
+    title = values["title"] or workbook.path.stem
+    description = values["description"]
     stable_part = workbook.workbook_id or workbook.relative_path
-    frontmatter["sourceId"] = f"{source.id}:{stable_part}"
-    frontmatter.setdefault("date", timestamp)
-    if touch_updated or "updated" not in frontmatter:
-        frontmatter["updated"] = timestamp
-    frontmatter.setdefault("noteId", str(uuid.uuid4()))
 
     try:
         template = load_note_template(source.profile)
         rendered_template = template.render(
             {
-                "title": str(frontmatter["title"]),
-                "description": str(frontmatter["description"]),
+                "title": title,
+                "description": description,
+                "nouns": metadata_to_nouns(values["category"], values["keywords"]),
+                "files": existing_frontmatter.get("files", []),
+                "source_root": source.id,
+                "source_file_name": values["sourceFileName"],
+                "source_id": f"{source.id}:{stable_part}",
+                "date": existing_frontmatter.get("date", timestamp),
+                "updated": (
+                    timestamp
+                    if touch_updated or "updated" not in existing_frontmatter
+                    else existing_frontmatter["updated"]
+                ),
+                "note_id": existing_frontmatter.get("noteId", str(uuid.uuid4())),
                 "workbook_path": f"`{workbook.path}`",
                 "workbook_map": _render_map(workbook),
                 "extracted_text": _render_text(workbook),
                 "excel_metadata": _render_excel_metadata(workbook),
             }
         )
-        sections = managed_blocks(rendered_template, template)
+        sections = managed_blocks(rendered_template.body, template)
     except NoteResourceError as exc:
         raise NoteError(str(exc)) from exc
+
+    frontmatter = _merge_frontmatter(rendered_template.frontmatter, existing_frontmatter)
 
     if existing:
         body = existing.body
         for section in sections:
             body = _replace_managed(body, section)
     else:
-        body = rendered_template.rstrip() + "\n"
+        body = rendered_template.body.rstrip() + "\n"
     yaml_text = yaml.safe_dump(
         frontmatter,
         allow_unicode=True,

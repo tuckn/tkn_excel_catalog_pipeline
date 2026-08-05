@@ -1,6 +1,21 @@
+---
+type: Excel
+schemaVersion: "1.0"
+title: {{ title }}
+description: {{ description }}
+nouns: {{ nouns }}
+files: {{ files }}
+sourceRoot: {{ source_root }}
+sourceFileName: {{ source_file_name }}
+sourceId: {{ source_id }}
+date: {{ date }}
+updated: {{ updated }}
+noteId: {{ note_id }}
+---
+
 # {{ title }}
 
-## 概要
+## Overview
 
 {{ description | Excel workbookの検索・管理用代理ノート。 }}
 
@@ -17,7 +32,7 @@
 <!-- excel-catalog:end workbook-map -->
 
 <!-- excel-catalog:begin extracted-text -->
-## 抽出テキスト
+## Extracted Text
 
 {{ extracted_text }}
 <!-- excel-catalog:end extracted-text -->

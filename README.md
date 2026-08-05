@@ -166,6 +166,7 @@ excel-catalog adopt --write-excel
 
 | Markdown proxy note | Excel core property                   |
 | ------------------- | ------------------------------------- |
+| `schemaVersion: "1.0"` | Current proxy-note Frontmatter contract; not workbook metadata |
 | `title`           | Title                                 |
 | `description`     | Comments / description                |
 | `nouns[0]`        | Categories / category                 |
@@ -175,9 +176,11 @@ excel-catalog adopt --write-excel
 Proxy notes are named `<workbook-name>.xlsx.md` or `<workbook-name>.xlsm.md`.
 Generated body sections are enclosed by `excel-catalog` markers. Unknown Frontmatter
 fields and text outside those markers are preserved.
+Legacy proxy notes without `schemaVersion` remain readable. A reviewed, explicit note
+write adds the current profile version; a dry run does not modify the note.
 
-The generated body structure, headings, section order, and default description are
-owned by the application profile at
+The generated Frontmatter contract and body structure, including `schemaVersion`,
+headings, section order, and default description, are owned by the application profile at
 `src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md`. It is shipped
 as a package resource and is not a user configuration file. Python owns resource
 loading and validation, dynamic workbook content, and safe marker replacement.

@@ -56,6 +56,22 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
     note_path.write_text(rendered, encoding="utf-8")
     updated = read_note(note_path)
     assert updated.frontmatter["customField"] == "keep-me"
+    assert updated.frontmatter["schemaVersion"] == "1.0"
+    assert list(updated.frontmatter) == [
+        "type",
+        "schemaVersion",
+        "title",
+        "description",
+        "nouns",
+        "files",
+        "sourceRoot",
+        "sourceFileName",
+        "sourceId",
+        "customField",
+        "date",
+        "updated",
+        "noteId",
+    ]
     assert "Handwritten text." in updated.body
     assert "<!-- excel-catalog:begin workbook-path -->" in updated.body
     assert str(workbook_path) in updated.body
@@ -69,7 +85,27 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
 
     template = load_note_template(source.profile)
     rendered = render_note(workbook, source)
+    note_path = tmp_path / "rendered.md"
+    note_path.write_text(rendered, encoding="utf-8")
+    note = read_note(note_path)
 
+    assert template.schema_version == "1.0"
+    assert template.frontmatter_fields == (
+        "type",
+        "schemaVersion",
+        "title",
+        "description",
+        "nouns",
+        "files",
+        "sourceRoot",
+        "sourceFileName",
+        "sourceId",
+        "date",
+        "updated",
+        "noteId",
+    )
+    assert note.frontmatter["schemaVersion"] == template.schema_version
+    assert tuple(note.frontmatter) == template.frontmatter_fields
     assert template.managed_names == (
         "workbook-path",
         "workbook-map",
