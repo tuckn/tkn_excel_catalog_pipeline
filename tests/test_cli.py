@@ -65,6 +65,83 @@ sources:
     assert not notes.exists()
 
 
+def test_cli_status_logs_grouped_counts_and_attention_items(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    workbooks = tmp_path / "workbooks"
+    notes = tmp_path / "notes"
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f'''schema_version: 1
+sources:
+  - id: example
+    path: "{workbooks.as_posix()}"
+    include: ["**/*.xlsx"]
+    notes:
+      root: "{notes.as_posix()}"
+''',
+        encoding="utf-8",
+    )
+
+    def fake_run_status(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return [
+            Action(status="tracked", source_root_id="example", source_path="tracked.xlsx"),
+            Action(
+                status="untracked-source",
+                source_root_id="example",
+                source_path="nested/new.xlsx",
+                message="stateMatch=none",
+            ),
+            *(
+                Action(
+                    status="untracked-note",
+                    source_root_id="example",
+                    note_path=str(notes / f"orphan-{index:02}.xlsx.md"),
+                )
+                for index in range(21)
+            ),
+            Action(
+                status="duplicate-id",
+                source_root_id="example",
+                source_path="duplicate.xlsx",
+                workbook_id="duplicate-workbook-id",
+            ),
+        ]
+
+    monkeypatch.setattr(cli_module, "run_status", fake_run_status)
+    result = main(
+        ["--config", str(config), "--report-dir", str(tmp_path / "reports"), "status"]
+    )
+    captured = capsys.readouterr()
+
+    payload = json.loads(captured.out)
+    assert result == 0
+    assert captured.out.count("\n") == 1
+    assert "[INFO] Status results:\n  example:" in captured.err
+    assert "    tracked workbooks: 1" in captured.err
+    assert "    untracked workbooks: 1" in captured.err
+    assert "    untracked proxy notes: 21" in captured.err
+    assert "    workbooks with duplicate IDs: 1" in captured.err
+    assert "    items requiring attention:" in captured.err
+    assert "      untracked workbooks:\n        - nested/new.xlsx" in captured.err
+    assert "      untracked proxy notes:\n        - orphan-00.xlsx.md" in captured.err
+    assert "        - orphan-19.xlsx.md" in captured.err
+    assert "        ... 1 more; see the report below" in captured.err
+    assert "orphan-20.xlsx.md" not in captured.err
+    assert (
+        "      workbooks with duplicate IDs:\n"
+        "        - duplicate.xlsx | workbookId=duplicate-workbook-id" in captured.err
+    )
+    assert str(notes.resolve()) not in captured.err
+    assert "tracked.xlsx" not in captured.err
+    assert payload["statusCounts"] == {
+        "tracked": 1,
+        "untracked-source": 1,
+        "untracked-note": 21,
+        "duplicate-id": 1,
+    }
+
+
 def test_cli_push_logs_non_unchanged_files_and_readable_summary(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:  # type: ignore[no-untyped-def]

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,15 @@ SUCCESS = 25
 logging.addLevelName(SUCCESS, "SUCCESS")
 RESET = "\x1b[0m"
 COLORS = {SUCCESS: "\x1b[32m", logging.ERROR: "\x1b[31m", logging.CRITICAL: "\x1b[31m"}
+STATUS_ITEM_LIMIT = 20
+STATUS_LABELS = {
+    "tracked": "tracked workbooks",
+    "untracked-source": "untracked workbooks",
+    "untracked-note": "untracked proxy notes",
+    "duplicate-id": "workbooks with duplicate IDs",
+    "unsupported": "unsupported workbooks",
+    "read-error": "read errors",
+}
 
 
 class ColorFormatter(logging.Formatter):
@@ -226,6 +236,69 @@ def _log_readable_summary(logger: logging.Logger, summary: dict[str, Any]) -> No
     logger.info("Summary:\n%s", json.dumps(summary, ensure_ascii=False, indent=2))
 
 
+def _status_action_target(action: Action, source: SourceConfig) -> str:
+    if action.source_path:
+        return action.source_path
+    if action.note_path:
+        note_path = Path(action.note_path)
+        try:
+            return str(note_path.resolve().relative_to(source.note_root.resolve()))
+        except (OSError, ValueError):
+            return note_path.name
+    return "source scan"
+
+
+def _status_action_details(action: Action) -> str:
+    details: list[str] = []
+    if action.workbook_id:
+        details.append(f"workbookId={_one_line(action.workbook_id)}")
+    warnings = action.details.get("warnings", [])
+    if isinstance(warnings, list):
+        details.extend(_one_line(str(warning)) for warning in warnings if warning)
+    if action.message and not action.message.startswith("stateMatch="):
+        details.append(_one_line(action.message))
+    return " | ".join(details)
+
+
+def _ordered_statuses(counts: Counter[str]) -> list[str]:
+    known = [status for status in STATUS_LABELS if counts[status]]
+    return [*known, *sorted(status for status in counts if status not in STATUS_LABELS)]
+
+
+def _log_status_results(
+    logger: logging.Logger,
+    actions: list[Action],
+    sources: tuple[SourceConfig, ...],
+) -> None:
+    lines: list[str] = []
+    for source in sources:
+        source_actions = [action for action in actions if action.source_root_id == source.id]
+        counts = Counter(action.status for action in source_actions)
+        statuses = _ordered_statuses(counts)
+        lines.append(f"  {source.id}:")
+        if not statuses:
+            lines.append("    no workbooks or proxy notes found")
+            continue
+        for status in statuses:
+            lines.append(f"    {STATUS_LABELS.get(status, status)}: {counts[status]}")
+        attention = [status for status in statuses if status != "tracked"]
+        if not attention:
+            lines.append("    items requiring attention: none")
+            continue
+        lines.append("    items requiring attention:")
+        for status in attention:
+            matching = [action for action in source_actions if action.status == status]
+            lines.append(f"      {STATUS_LABELS.get(status, status)}:")
+            for action in matching[:STATUS_ITEM_LIMIT]:
+                item = f"        - {_status_action_target(action, source)}"
+                details = _status_action_details(action)
+                lines.append(f"{item} | {details}" if details else item)
+            remaining = len(matching) - STATUS_ITEM_LIMIT
+            if remaining > 0:
+                lines.append(f"        ... {remaining} more; see the report below")
+    logger.info("Status results:\n%s", "\n".join(lines))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -303,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
             report_root=report_root,
             extra=extra,
         )
+        if args.command == "status":
+            _log_status_results(logger, actions, sources)
         if summary["status"] == "success":
             logger.log(SUCCESS, "%s completed; report: %s", args.command, summary["reportPath"])
         elif summary["status"] == "conflict":

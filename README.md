@@ -283,6 +283,12 @@ instead of repeating the full note path. Unchanged files appear only as a count 
 One compact JSON result still goes to stdout. Use `--quiet`, `--verbose`, or
 `--no-color`; `NO_COLOR` is honored.
 
+`status` groups counts by configured source. It lists only items that require attention,
+such as untracked workbooks, untracked proxy notes, duplicate IDs, unsupported files, and
+read errors. Tracked workbooks are reported as a count rather than listed individually.
+Each attention category shows at most 20 relative paths; the run report contains the full
+details.
+
 - `0`: success
 - `1`: execution, validation, or partial write error
 - `2`: unresolved conflict

@@ -154,7 +154,8 @@ optionなしの`pull`と`push`はdry-runです。`sync.allow_source_rename`は�
 
 ## 基本操作
 
-inventory確認:
+設定したsource内のExcel workbookと代理ノートを走査し、追跡状況、重複ID、
+読み取りエラーを確認:
 
 ```console
 excel-catalog status
@@ -274,6 +275,11 @@ fileごとの結果を確定するたびに、noteのfile nameと相対`sourcePa
 indent付きのsummaryを表示します。`unchanged`は個別表示せず、最終summaryに総数だけを表示します。stdoutには
 従来どおりcompact JSONを1件だけ出します。`--quiet`、`--verbose`、`--no-color`を提供し、
 `NO_COLOR`も尊重します。
+
+`status`は、設定したsourceごとに件数をまとめ、未追跡workbook、未追跡代理ノート、
+重複ID、未対応file、読み取りエラーなど、確認が必要な項目だけを一覧表示します。
+追跡済みworkbookは個別表示せず、件数だけを表示します。確認項目の相対pathは分類ごとに
+最大20件を表示し、全件の詳細はrun reportに保存します。
 
 - `0`: 成功
 - `1`: 実行・validation・partial write error
