@@ -14,15 +14,15 @@ from .adapters.filesystem import (
     RenameError,
     backup_workbook,
     rename_workbook,
-    validate_workbook_filename,
+    validate_workbook_relative_path,
 )
 from .adapters.markdown import (
     NoteError,
     basename_collisions,
     discover_notes,
     find_obsidian_vault_root,
-    note_filename,
     note_metadata,
+    note_path,
     read_note,
     render_note,
     workbook_path,
@@ -34,6 +34,7 @@ from .adapters.ooxml import (
     inspect_workbook,
     write_properties,
 )
+from .discovery import is_source_path_in_scope
 from .models import Action, AppConfig, ProxyNote, SourceConfig, WorkbookInfo
 from .paths import state_path, state_root
 from .state import find_entry, load_state, make_entry, replace_entry, save_state, state_key
@@ -147,7 +148,7 @@ def run_status(config: AppConfig, sources: tuple[SourceConfig, ...]) -> list[Act
             workbooks = discover_workbooks(
                 source, max_text_chars=config.sync.max_extracted_text_chars
             )
-            notes = discover_notes(source.note_root)
+            notes = discover_notes(source)
         except (WorkbookError, NoteError, OSError) as exc:
             actions.append(Action(status="read-error", source_root_id=source.id, message=str(exc)))
             continue
@@ -206,7 +207,7 @@ def run_pull(
             workbooks = discover_workbooks(
                 source, max_text_chars=config.sync.max_extracted_text_chars
             )
-            notes = discover_notes(source.note_root)
+            notes = discover_notes(source)
         except (WorkbookError, NoteError, OSError) as exc:
             actions.append(Action(status="read-error", source_root_id=source.id, message=str(exc)))
             continue
@@ -242,8 +243,8 @@ def run_pull(
             note = _find_note(workbook, entry, index)
             source_values = workbook.metadata()
             if note is None:
-                target = source.note_root / note_filename(workbook)
-                if target.resolve() in used_note_paths:
+                target = note_path(workbook, source)
+                if target.exists() or target.resolve() in used_note_paths:
                     suffix = hashlib.sha256(workbook.relative_path.encode()).hexdigest()[:8]
                     target = target.with_name(f"{target.stem}--{suffix}{target.suffix}")
                 status = "missing-note" if entry is not None else "would-create"
@@ -251,6 +252,7 @@ def run_pull(
                     content = render_note(workbook, source)
                     write_note_atomic(target, content)
                     note = read_note(target)
+                    used_note_paths.add(target.resolve())
                     entry_value = make_entry(
                         workbook,
                         note,
@@ -333,9 +335,8 @@ def run_pull(
             pull_fields = direction_fields(decisions, "pull")
             if preference == "source":
                 pull_fields.extend(conflicts)
-            source_renamed = bool(entry and entry.get("currentPath") != workbook.relative_path)
-            desired_path = source.note_root / note_filename(workbook)
-            rename_needed = source_renamed and desired_path.resolve() != note.path.resolve()
+            desired_path = note_path(workbook, source)
+            rename_needed = desired_path.resolve() != note.path.resolve()
             if rename_needed:
                 collision_root = find_obsidian_vault_root(source.note_root)
                 collisions = basename_collisions(
@@ -411,12 +412,15 @@ def run_pull(
         for key, entry in state["entries"].items():
             if not isinstance(entry, dict) or entry.get("sourceRootId") != source.id:
                 continue
-            if key not in seen_state_keys and str(entry.get("currentPath", "")):
+            current_path = str(entry.get("currentPath", ""))
+            if not is_source_path_in_scope(current_path, source):
+                continue
+            if key not in seen_state_keys and current_path:
                 actions.append(
                     Action(
                         status="missing-source",
                         source_root_id=source.id,
-                        source_path=str(entry.get("currentPath", "")),
+                        source_path=current_path,
                         note_path=str(entry.get("notePath", "")),
                         workbook_id=str(entry.get("workbookId", "")),
                         message="Source is missing; no note was deleted.",
@@ -457,7 +461,10 @@ def _find_workbook_for_note(note: ProxyNote, workbooks: list[WorkbookInfo]) -> W
     ]
     if len(matches) == 1:
         return matches[0]
-    filename = str(note.frontmatter.get("sourceFileName", "")).casefold()
+    filename = str(note.frontmatter.get("sourceFileName", "")).replace("\\", "/").casefold()
+    matches = [item for item in workbooks if item.relative_path.casefold() == filename]
+    if len(matches) == 1:
+        return matches[0]
     matches = [item for item in workbooks if item.path.name.casefold() == filename]
     return matches[0] if len(matches) == 1 else None
 
@@ -491,11 +498,7 @@ def run_push(
     for source in sources:
         try:
             workbooks = discover_workbooks(source, max_text_chars=1)
-            notes = [
-                note
-                for note in discover_notes(source.note_root)
-                if _note_selected(note, note_filters)
-            ]
+            notes = [note for note in discover_notes(source) if _note_selected(note, note_filters)]
         except (WorkbookError, NoteError, OSError) as exc:
             record(Action(status="read-error", source_root_id=source.id, message=str(exc)))
             continue
@@ -586,8 +589,8 @@ def run_push(
             target_path = workbook.path
             if rename_requested:
                 try:
-                    target_path = validate_workbook_filename(
-                        workbook.path, note_values["sourceFileName"]
+                    target_path = validate_workbook_relative_path(
+                        source.path, workbook.path, note_values["sourceFileName"]
                     )
                 except RenameError as exc:
                     record(
@@ -611,7 +614,10 @@ def run_push(
                         )
                     )
                     continue
-                desired_note = note.path.with_name(target_path.name + ".md")
+                relative_target = target_path.relative_to(source.path).as_posix()
+                desired_note = (
+                    source.note_root / Path(relative_target).parent / (target_path.name + ".md")
+                )
                 collision_root = find_obsidian_vault_root(source.note_root)
                 collisions = basename_collisions(
                     collision_root, desired_note.name, target=note.path
@@ -680,7 +686,13 @@ def run_push(
                             used_backup = True
                         rename_workbook(workbook.path, target_path)
                         active_workbook_path = target_path
-                        desired_note = note.path.with_name(target_path.name + ".md")
+                        relative_target = target_path.relative_to(source.path).as_posix()
+                        desired_note = (
+                            source.note_root
+                            / Path(relative_target).parent
+                            / (target_path.name + ".md")
+                        )
+                        desired_note.parent.mkdir(parents=True, exist_ok=True)
                         note.path.replace(desired_note)
                         active_note_path = desired_note
                         note = read_note(desired_note)

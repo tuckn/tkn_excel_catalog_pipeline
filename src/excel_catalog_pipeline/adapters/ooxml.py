@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import cast
 from xml.etree import ElementTree as ET
 
+from ..discovery import is_source_path_in_scope
 from ..models import SourceConfig, WorkbookInfo
 
 OOXML_EXTENSIONS = {".xlsx", ".xlsm"}
@@ -308,10 +309,14 @@ def discover_workbooks(source: SourceConfig, *, max_text_chars: int) -> list[Wor
     if not source.path.exists():
         raise WorkbookError(f"Source root not found: {source.path}")
     paths: dict[str, Path] = {}
-    for pattern in source.include:
-        for path in source.path.glob(pattern):
-            if path.is_file() and not path.name.startswith("~$"):
-                paths[str(path.resolve()).casefold()] = path.resolve()
+    candidates = source.path.rglob("*") if source.recursive else source.path.iterdir()
+    for path in candidates:
+        if not path.is_file() or path.name.startswith("~$"):
+            continue
+        relative = path.relative_to(source.path).as_posix()
+        if not is_source_path_in_scope(relative, source):
+            continue
+        paths[str(path.resolve()).casefold()] = path.resolve()
     return [
         inspect_workbook(path, source, max_text_chars=max_text_chars)
         for path in sorted(paths.values(), key=lambda item: item.as_posix().casefold())

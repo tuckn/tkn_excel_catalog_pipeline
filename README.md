@@ -71,10 +71,12 @@ The main settings are:
 | `schema_version` | Configuration format version; keep `1`. |
 | `sources[].id` | A user-chosen, unique, stable name for one Excel source. |
 | `sources[].path` | Root folder containing the source Excel workbooks. |
-| `sources[].include` | Glob patterns for workbooks below that root. |
+| `sources[].recursive` | When `true`, scan subfolders. The default is `false`, which reads only the source root. |
+| `sources[].include` | Glob patterns selecting workbooks at the scanned levels. |
+| `sources[].ignore` | Source-root-relative glob patterns excluding files or folders. |
 | `sources[].notes.root` | Proxy-note folder: `pull` writes here and `push` reads from here. |
 | `sources[].profile` | Note-format profile; keep `tkn-obsidian-v1` in the current version. |
-| `sources[].rename_adapter` | `report-only` only reports renames; `filesystem` may apply an explicitly authorized rename. |
+| `sources[].rename_adapter` | Controls rename and folder-move handling. The default `report-only` changes no files; `filesystem` performs direct changes only with the explicit write options described below. |
 | `sync.max_extracted_text_chars` | Maximum extracted workbook text stored in a proxy note. |
 
 The remaining `sync` booleans document safety policy for future extension. The
@@ -103,6 +105,54 @@ excel-catalog --config C:\path\to\config.yaml config show
 
 Source IDs must be unique. The schema supports multiple roots; use `--source <id>` to
 limit a run to one root.
+
+This example enables subfolder scanning while excluding unwanted folders. Use `/` as the pattern separator on every OS. `ignore` applies to paths relative to `path`; exclude a whole folder with a pattern such as `archive/**`.
+
+```yaml
+sources:
+  - id: personal-excel
+    path: 'C:\path\to\excel-workbooks'
+    recursive: true
+    include:
+      - "*.xlsx"
+      - "*.xlsm"
+    ignore:
+      - "archive/**"
+      - "**/Temp/**"
+    notes:
+      root: 'C:\path\to\obsidian-vault\reference\entities\files\Excel'
+      profile: tkn-obsidian-v1
+      rename_adapter: filesystem
+```
+
+With `recursive: true`, the proxy-note tree mirrors each workbook's source-relative parent folder. For example, `2008/example.xlsx` becomes `2008/example.xlsx.md` below the notes root and records `sourceFileName: 2008/example.xlsx`. After externally moving existing workbooks into year folders, run `pull` first to review the plan and then `pull --write-notes`. Applying tracked proxy-note folder moves directly requires `rename_adapter: filesystem`.
+
+### Configuring renames and folder moves
+
+Renames and folder moves can originate in either direction, depending on where the user makes the change.
+
+| Changed location | Request detected by the CLI | Files changed when authorized |
+| --- | --- | --- |
+| Rename or move a workbook in Explorer or another external tool, then run `pull` | Rename or move the proxy note to match the source-relative workbook path | Proxy note |
+| Edit the proxy note Frontmatter `sourceFileName`, then run `push` | Rename or move the workbook within its source root | Workbook and proxy note |
+
+`rename_adapter` specifies, for each source, whether the CLI may handle that request directly on the filesystem.
+
+- `report-only`: The default. When a rename or folder move is required, the CLI changes no files and records a `rename-required` action in the run report.
+- `filesystem`: Allows the CLI to rename or move a workbook or proxy note using ordinary filesystem operations without backlink maintenance.
+
+Setting `filesystem` alone does not change files. The corresponding write options are also required.
+
+| Direction | Required setting and command |
+| --- | --- |
+| Rename or move the workbook first, then make the proxy note follow it | `rename_adapter: filesystem` and `pull --write-notes` |
+| Edit `sourceFileName`, then rename or move the workbook and proxy note | `rename_adapter: filesystem` and `push --write-excel --allow-rename` |
+
+`pull` and `push` without write options remain dry runs. `sync.allow_source_rename` is not used by the current rename authorization checks; use `rename_adapter` and the command options shown above.
+
+The affected file, current source and note paths, and reason for a `rename-required` action are recorded in `~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv` and `details.json`. When `pull` needs to move a proxy note, `details.json` also contains the requested note path and collision information. For `push`, the requested relative path remains visible in the edited Frontmatter `sourceFileName`. The CLI prints the report folder when the command finishes and, during `push`, also prints each `rename-required` result to stderr.
+
+`filesystem` moves Markdown files directly and does not update Obsidian backlinks, which is why `report-only` is the default. If backlink maintenance matters, review the report and rename the note manually in Obsidian, or keep using `report-only` until an appropriate external adapter is available.
 
 ## Basic use
 
@@ -171,9 +221,9 @@ excel-catalog adopt --write-excel
 | `description`     | Comments / description                |
 | `nouns[0]`        | Categories / category                 |
 | `nouns[1..]`      | Tags / keywords                       |
-| `sourceFileName`  | Explicit rename request, not metadata |
+| `sourceFileName`  | Source-root-relative workbook path; editing it requests an explicit rename or move |
 
-Proxy notes are named `<workbook-name>.xlsx.md` or `<workbook-name>.xlsm.md`.
+Proxy notes are named `<workbook-name>.xlsx.md` or `<workbook-name>.xlsm.md`. Recursive discovery mirrors the source-relative folder structure below the notes root.
 Generated body sections are enclosed by `excel-catalog` markers. Unknown Frontmatter
 fields and text outside those markers are preserved.
 Legacy proxy notes without `schemaVersion` remain readable. A reviewed, explicit note
@@ -192,16 +242,7 @@ current workbook, and current note. Different changes on both sides return exit 
 `2`; no last-write-wins rule is applied. After review, `--prefer-source` or
 `--prefer-note` can resolve that run explicitly.
 
-Workbook rename requires all of the following:
-
-- an edited `sourceFileName`
-- `push --write-excel --allow-rename`
-- a valid same-extension Windows filename with no collision
-- a configured rename adapter capable of coordinating the proxy note
-
-`rename_adapter: report-only` stops with `rename-required`. `filesystem` is suitable
-only when direct Markdown rename without backlink maintenance is acceptable. An
-Obsidian-specific rename remains report-only until an external adapter is configured.
+See “Configuring renames and folder moves” under “Configure” for the two detection directions, required options, and report locations. A rename target must be a valid, collision-free source-relative path that stays inside the source root and preserves the current workbook extension.
 
 ## Outputs and safety
 

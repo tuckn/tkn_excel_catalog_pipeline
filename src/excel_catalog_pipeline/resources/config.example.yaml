@@ -3,9 +3,11 @@ schema_version: 1
 sources:
   - id: personal-excel
     path: 'C:\path\to\excel-workbooks'
+    recursive: false
     include:
-      - "**/*.xlsx"
-      - "**/*.xlsm"
+      - "*.xlsx"
+      - "*.xlsm"
+    ignore: []
     notes:
       root: 'C:\path\to\obsidian-vault\reference\entities\files\Excel'
       profile: tkn-obsidian-v1

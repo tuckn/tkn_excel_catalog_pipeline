@@ -29,7 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 TOP_LEVEL_KEYS = {"schema_version", "sources", "sync"}
 SYNC_KEYS = set(DEFAULT_CONFIG["sync"])
-SOURCE_KEYS = {"id", "path", "include", "notes"}
+SOURCE_KEYS = {"id", "path", "recursive", "include", "ignore", "notes"}
 NOTES_KEYS = {"root", "profile", "rename_adapter"}
 
 
@@ -176,13 +176,21 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         if source_id in seen:
             raise ConfigError(f"Duplicate source id: {source_id}")
         seen.add(source_id)
-        include = item.get("include", ["**/*.xlsx", "**/*.xlsm"])
+        recursive = item.get("recursive", False)
+        if not isinstance(recursive, bool):
+            raise ConfigError(f"sources[{index}].recursive must be boolean")
+        include = item.get("include", ["*.xlsx", "*.xlsm"])
         if (
             not isinstance(include, list)
             or not include
             or not all(isinstance(value, str) and value for value in include)
         ):
             raise ConfigError(f"sources[{index}].include must be a non-empty string list")
+        ignore = item.get("ignore", [])
+        if not isinstance(ignore, list) or not all(
+            isinstance(value, str) and value for value in ignore
+        ):
+            raise ConfigError(f"sources[{index}].ignore must be a string list")
         notes = item.get("notes")
         if not isinstance(notes, dict):
             raise ConfigError(f"sources[{index}].notes must be a mapping")
@@ -200,6 +208,8 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
                 path=_path_value(item.get("path"), f"sources[{index}].path"),
                 include=tuple(include),
                 note_root=_path_value(notes.get("root"), f"sources[{index}].notes.root"),
+                recursive=recursive,
+                ignore=tuple(ignore),
                 profile=profile,
                 rename_adapter=str(notes.get("rename_adapter", "report-only")),
             )
@@ -228,7 +238,9 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
             {
                 "id": source.id,
                 "path": str(source.path),
+                "recursive": source.recursive,
                 "include": list(source.include),
+                "ignore": list(source.ignore),
                 "notes": {
                     "root": str(source.note_root),
                     "profile": source.profile,

@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from ..discovery import matches_any, normalize_relative_path
 from ..models import ProxyNote, SourceConfig, WorkbookInfo
 from ..note_resources import (
     ManagedBlock,
@@ -48,15 +49,24 @@ def read_note(path: Path) -> ProxyNote:
     return ProxyNote(path=path, frontmatter=loaded, body=text[match.end() :])
 
 
-def discover_notes(root: Path) -> list[ProxyNote]:
+def discover_notes(source: SourceConfig) -> list[ProxyNote]:
+    root = source.note_root
     if not root.exists():
         return []
     notes: list[ProxyNote] = []
-    for path in sorted(root.glob("*.md"), key=lambda item: item.name.casefold()):
+    candidates = root.rglob("*.md") if source.recursive else root.glob("*.md")
+    for path in sorted(candidates, key=lambda item: item.as_posix().casefold()):
         note = read_note(path)
         if str(note.frontmatter.get("type", "")).casefold() == "excel" or (
             note.frontmatter.get("fileKind") == "excelWorkbook"
         ):
+            recorded = normalize_relative_path(str(note.frontmatter.get("sourceFileName", "")))
+            note_relative = path.relative_to(root).as_posix()
+            inferred = note_relative[:-3] if note_relative.casefold().endswith(".md") else ""
+            if source.ignore and (
+                matches_any(recorded, source.ignore) or matches_any(inferred, source.ignore)
+            ):
+                continue
             notes.append(note)
     return notes
 
@@ -220,6 +230,14 @@ def note_filename(workbook: WorkbookInfo) -> str:
     stem = invalid.sub(" ", workbook.path.stem)
     stem = re.sub(r"\s+", " ", stem).strip(" .") or "Untitled Excel Workbook"
     return f"{stem[:150]}{workbook.extension}.md"
+
+
+def note_path(workbook: WorkbookInfo, source: SourceConfig) -> Path:
+    """Return the proxy-note path mirroring the workbook's relative parent folder."""
+    parent = Path(workbook.relative_path).parent
+    if parent == Path("."):
+        return source.note_root / note_filename(workbook)
+    return source.note_root / parent / note_filename(workbook)
 
 
 def _merge_frontmatter(rendered: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:

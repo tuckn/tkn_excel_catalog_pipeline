@@ -33,6 +33,8 @@ class SourceConfig:
     path: Path
     include: tuple[str, ...]
     note_root: Path
+    recursive: bool = False
+    ignore: tuple[str, ...] = ()
     profile: str = "tkn-obsidian-v1"
     rename_adapter: str = "report-only"
 
@@ -84,7 +86,7 @@ class WorkbookInfo:
             "description": self.core.get("description", ""),
             "category": _canonical_terms(self.core.get("category", "")),
             "keywords": _canonical_terms(self.core.get("keywords", "")),
-            "sourceFileName": self.path.name,
+            "sourceFileName": self.relative_path,
         }
 
 

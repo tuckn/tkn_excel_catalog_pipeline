@@ -7,6 +7,7 @@ import pytest
 import excel_catalog_pipeline.config as config_module
 from excel_catalog_pipeline.config import (
     ConfigError,
+    config_as_dict,
     config_template_text,
     init_user_config,
     load_config,
@@ -51,6 +52,56 @@ def test_unknown_key_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "missing")
     with pytest.raises(ConfigError, match="Unknown top-level"):
         load_config(explicit=path, cwd=tmp_path)
+
+
+def test_source_traversal_defaults_are_non_recursive(tmp_path: Path) -> None:
+    loaded = config_module.validate_config(
+        {
+            "schema_version": 1,
+            "sync": dict(config_module.DEFAULT_CONFIG["sync"]),
+            "sources": [
+                {
+                    "id": "example",
+                    "path": str(tmp_path / "source"),
+                    "notes": {"root": str(tmp_path / "notes")},
+                }
+            ],
+        }
+    )
+
+    source = loaded.sources[0]
+    assert source.recursive is False
+    assert source.include == ("*.xlsx", "*.xlsm")
+    assert source.ignore == ()
+    rendered = config_as_dict(loaded)["sources"][0]
+    assert rendered["recursive"] is False
+    assert rendered["ignore"] == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("recursive", "yes", "recursive must be boolean"),
+        ("ignore", "archive/**", "ignore must be a string list"),
+    ],
+)
+def test_invalid_source_traversal_settings_are_rejected(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    source = {
+        "id": "example",
+        "path": str(tmp_path / "source"),
+        "notes": {"root": str(tmp_path / "notes")},
+        field: value,
+    }
+    with pytest.raises(ConfigError, match=message):
+        config_module.validate_config(
+            {
+                "schema_version": 1,
+                "sources": [source],
+                "sync": dict(config_module.DEFAULT_CONFIG["sync"]),
+            }
+        )
 
 
 def test_unknown_note_profile_is_rejected_in_config(

@@ -71,10 +71,12 @@ excel-catalog config init
 | `schema_version` | 設定formatのversionです。`1`のまま使用します。 |
 | `sources[].id` | Excel sourceを識別する、一意で安定した任意の名前です。 |
 | `sources[].path` | source Excel fileを格納するroot folderです。 |
-| `sources[].include` | root配下で対象にするworkbookのglob patternです。 |
+| `sources[].recursive` | `true`ならサブフォルダも探索します。未設定時の既定値は`false`で、root直下だけを読みます。 |
+| `sources[].include` | 探索する階層で対象にするworkbookのglob patternです。 |
+| `sources[].ignore` | source root基準で対象外にするfileまたはfolderのglob patternです。 |
 | `sources[].notes.root` | 代理noteのfolderです。`pull`の出力先であり、`push`の入力元です。 |
 | `sources[].profile` | note形式のprofileです。現versionでは`tkn-obsidian-v1`のまま使用します。 |
-| `sources[].rename_adapter` | `report-only`はrenameを報告だけし、`filesystem`は明示的に許可したrenameを適用できます。 |
+| `sources[].rename_adapter` | rename・folder移動の処理方法です。既定の`report-only`はfileを変更せず、`filesystem`は後述の明示的なwrite optionと組み合わせて直接変更します。 |
 | `sync.max_extracted_text_chars` | 代理noteへ保存するworkbook抽出textの最大文字数です。 |
 
 その他の`sync`の真偽値は、将来の拡張に備えた安全方針です。現versionは未知のnote
@@ -101,6 +103,54 @@ excel-catalog --config C:\path\to\config.yaml config show
 
 source IDは一意である必要があります。schemaは複数rootを表現でき、`--source <id>`で
 1つに限定できます。
+
+サブフォルダを読み、不要なfolderを除外する設定例です。patternの区切りにはOSに関係なく`/`を使います。`ignore`は`path`からの相対pathに適用され、folder全体は`archive/**`のように指定できます。
+
+```yaml
+sources:
+  - id: personal-excel
+    path: 'C:\path\to\excel-workbooks'
+    recursive: true
+    include:
+      - "*.xlsx"
+      - "*.xlsm"
+    ignore:
+      - "archive/**"
+      - "**/Temp/**"
+    notes:
+      root: 'C:\path\to\obsidian-vault\reference\entities\files\Excel'
+      profile: tkn-obsidian-v1
+      rename_adapter: filesystem
+```
+
+`recursive: true`では、source rootからの相対folderを代理note側にも再現します。例えば`2008/所有してきたCPUのベンチマーク比較.xlsx`は、notes rootの`2008/所有してきたCPUのベンチマーク比較.xlsx.md`となり、Frontmatterは`sourceFileName: 2008/所有してきたCPUのベンチマーク比較.xlsx`になります。既存workbookを年folderへ移動した後は、まず`pull`で予定を確認し、review後に`pull --write-notes`を実行してください。追跡済み代理noteのfolder移動を直接適用するには`rename_adapter: filesystem`が必要です。
+
+### rename・folder移動の設定
+
+rename・folder移動は、変更した場所によって次の2方向があります。
+
+| 変更した場所 | CLIが検出する要求 | 許可時にCLIが変更する対象 |
+| --- | --- | --- |
+| Explorerなどでworkbookをrename・移動した後に`pull` | sourceの相対pathに合わせた代理noteのrename・移動 | 代理note |
+| 代理noteのFrontmatter `sourceFileName`を編集した後に`push` | source root内でのworkbookのrename・移動 | workbookと代理note |
+
+`rename_adapter`は、この要求をfilesystem上で直接処理してよいかをsource単位で指定します。
+
+- `report-only`: 既定値です。rename・folder移動が必要でもfileを変更せず、actionを`rename-required`としてrun reportへ記録します。
+- `filesystem`: backlink更新を伴わない通常のfilesystem操作で、workbookまたは代理noteを直接rename・移動できるようにします。
+
+`filesystem`を設定しただけではfileは変更されません。実際の変更には、方向に応じて次のwrite optionも必要です。
+
+| 方向 | 必要な設定とcommand |
+| --- | --- |
+| workbookを先にrename・移動し、代理noteを追従させる | `rename_adapter: filesystem`と`pull --write-notes` |
+| `sourceFileName`を編集し、workbookと代理noteをrename・移動する | `rename_adapter: filesystem`と`push --write-excel --allow-rename` |
+
+optionなしの`pull`と`push`はdry-runです。`sync.allow_source_rename`は現versionのrename許可判定には使用されないため、上記の`rename_adapter`とcommand optionを使用してください。
+
+`rename-required`の対象、現在のsource path・note path、理由は`~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv`と`details.json`へ記録されます。`pull`で代理noteの移動が必要な場合は、希望するnote pathと衝突情報も`details.json`に入ります。`push`側の希望する相対pathは編集したFrontmatter `sourceFileName`で確認します。command終了時にreport folderがconsoleへ表示され、`push`ではfile単位の`rename-required`もstderrへ表示されます。
+
+`filesystem`はMarkdown fileを直接移動し、Obsidian backlinkを更新しません。そのため既定値は`report-only`です。backlink更新が必要なVaultではreportを確認し、Obsidian上で手動renameするか、対応する外部adapterが追加されるまで`report-only`を使用してください。
 
 ## 基本操作
 
@@ -168,9 +218,9 @@ excel-catalog adopt --write-excel
 | `description`    | Comments / description         |
 | `nouns[0]`       | Categories / category          |
 | `nouns[1..]`     | Tags / keywords                |
-| `sourceFileName` | metadataではなく明示rename要求 |
+| `sourceFileName` | source root基準の相対workbook path。編集時は明示rename/move要求 |
 
-代理ノート名は`<workbook-name>.xlsx.md`または`<workbook-name>.xlsm.md`です。生成管理する
+代理ノート名は`<workbook-name>.xlsx.md`または`<workbook-name>.xlsm.md`です。再帰探索時はsourceの相対folder構造をnotes root配下に再現します。生成管理する
 本文sectionは`excel-catalog` markerで囲みます。未知のFrontmatter fieldとmarker外の
 手書き本文は保持します。
 `schemaVersion`がないlegacy代理noteも引き続き読めます。review後の明示的なnote書込みで
@@ -187,16 +237,7 @@ validation、動的なworkbook内容の生成、安全なmarker置換を担当�
 異なる値へ変わった場合は終了code `2`で停止し、mtimeによるlast-write-winsは行いません。
 review後に`--prefer-source`または`--prefer-note`を明示できます。
 
-workbook renameには次をすべて要求します。
-
-- Frontmatter `sourceFileName`の編集
-- `push --write-excel --allow-rename`
-- 同じ拡張子で、Windows上有効かつ衝突しないfilename
-- 代理ノートも調整できるrename adapter
-
-`rename_adapter: report-only`では`rename-required`で停止します。`filesystem`はbacklink
-更新なしの直接Markdown renameを許容できる場合だけ使ってください。Obsidian固有renameは、
-外部adapterが設定されるまではreport-onlyです。
+rename・folder移動の検出方向、必要なoption、report先は「設定」の「rename・folder移動の設定」を参照してください。rename先はsource root内に収まり、現在と同じ拡張子で、Windows上有効かつ衝突しない相対pathである必要があります。
 
 ## 出力と安全性
 

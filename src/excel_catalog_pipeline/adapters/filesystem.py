@@ -6,6 +6,8 @@ import re
 import shutil
 from pathlib import Path
 
+from ..discovery import normalize_relative_path
+
 INVALID_WINDOWS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 RESERVED_NAMES = {
     "CON",
@@ -41,7 +43,43 @@ def validate_workbook_filename(current: Path, requested_name: str) -> Path:
     return target
 
 
+def validate_workbook_relative_path(source_root: Path, current: Path, requested_path: str) -> Path:
+    """Validate a source-relative workbook rename or move and return its target."""
+    if not requested_path or requested_path != requested_path.strip():
+        raise RenameError(
+            "Requested source-relative path must be non-empty without surrounding whitespace"
+        )
+    normalized = normalize_relative_path(requested_path)
+    requested = Path(normalized)
+    if Path(requested_path).is_absolute() or not normalized:
+        raise RenameError("Requested workbook path must be relative to the source root")
+    if any(part in {"", ".", ".."} for part in requested.parts):
+        raise RenameError("Requested workbook path must not contain empty, dot, or parent parts")
+    for part in requested.parts:
+        if part.endswith((".", " ")) or INVALID_WINDOWS_CHARS.search(part):
+            raise RenameError(
+                "Requested workbook path contains Windows-invalid characters or suffixes"
+            )
+        if Path(part).stem.upper() in RESERVED_NAMES:
+            raise RenameError("Requested workbook path uses a reserved Windows device name")
+        if len(part.encode("utf-8")) > 240:
+            raise RenameError("Requested workbook path contains a component that is too long")
+    if requested.suffix.casefold() != current.suffix.casefold():
+        raise RenameError("Workbook extension changes are format conversions and are not allowed")
+
+    root = source_root.resolve()
+    target = (root / requested).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise RenameError("Requested workbook path escapes the source root") from exc
+    if target.exists() and target != current.resolve():
+        raise RenameError(f"Rename target already exists: {target}")
+    return target
+
+
 def rename_workbook(current: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
     current.replace(target)
 
 

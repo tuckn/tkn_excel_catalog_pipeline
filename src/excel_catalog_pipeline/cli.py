@@ -126,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
     push.add_argument(
         "--allow-rename",
         action="store_true",
-        help="Allow validated filename changes requested through sourceFileName.",
+        help="Allow validated source-relative path changes requested through sourceFileName.",
     )
     push.add_argument(
         "--note",
@@ -166,17 +166,24 @@ def _yaml_single_quoted(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _log_source_configuration(
-    logger: logging.Logger, sources: tuple[SourceConfig, ...]
-) -> None:
+def _log_source_configuration(logger: logging.Logger, sources: tuple[SourceConfig, ...]) -> None:
     lines: list[str] = []
     for source in sources:
         lines.extend(
             [
                 f"  - id: {source.id}",
                 f"    path: {_yaml_single_quoted(str(source.path))}",
+                f"    recursive: {str(source.recursive).lower()}",
                 "    include:",
                 *(f"      - {json.dumps(pattern)}" for pattern in source.include),
+                *(
+                    [
+                        "    ignore:",
+                        *(f"      - {json.dumps(pattern)}" for pattern in source.ignore),
+                    ]
+                    if source.ignore
+                    else ["    ignore: []"]
+                ),
                 "    notes:",
                 f"      root: {_yaml_single_quoted(str(source.note_root))}",
                 f"      profile: {source.profile}",

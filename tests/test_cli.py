@@ -130,22 +130,19 @@ sources:
     assert "[INFO] Running push for 1 configured source(s): example." in captured.err
     assert "[INFO] Selected source configuration:\n  - id: example" in captured.err
     assert f"    path: '{workbooks.resolve()}'" in captured.err
+    assert "    recursive: false" in captured.err
     assert '      - "**/*.xlsx"' in captured.err
+    assert "    ignore: []" in captured.err
     assert f"      root: '{notes.resolve()}'" in captured.err
     assert "      profile: tkn-obsidian-v1" in captured.err
     assert "      rename_adapter: report-only" in captured.err
-    assert (
-        "[SUCCESS] [written] fileName=one.xlsx | sourcePath=one.xlsx | message=-"
-        in captured.err
-    )
+    assert "[SUCCESS] [written] fileName=one.xlsx | sourcePath=one.xlsx | message=-" in captured.err
     assert (
         "[INFO] [would-write] fileName=three.xlsx | sourcePath=nested/three.xlsx | "
-        "message=Metadata differs."
-        in captured.err
+        "message=Metadata differs." in captured.err
     )
     assert (
-        "[WARNING] [missing-source] missing.xlsx.md | "
-        "message=No unique workbook matches this note."
+        "[WARNING] [missing-source] missing.xlsx.md | message=No unique workbook matches this note."
     ) in captured.err
     assert "[missing-source] fileName=" not in captured.err
     assert "[missing-source] sourcePath=-" not in captured.err

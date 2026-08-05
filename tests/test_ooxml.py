@@ -7,6 +7,7 @@ import pytest
 
 from excel_catalog_pipeline.adapters.ooxml import (
     WorkbookError,
+    discover_workbooks,
     inspect_workbook,
     read_core_properties,
     read_custom_properties,
@@ -99,3 +100,31 @@ def test_non_zip_is_reported_as_read_error(tmp_path: Path) -> None:
     path.write_text("not a zip", encoding="utf-8")
     info = inspect_workbook(path, source_config(tmp_path), max_text_chars=100)
     assert info.read_status == "read-error"
+
+
+def test_discovery_is_non_recursive_by_default(tmp_path: Path) -> None:
+    create_workbook(tmp_path / "root.xlsx")
+    create_workbook(tmp_path / "2008" / "nested.xlsx")
+
+    found = discover_workbooks(source_config(tmp_path), max_text_chars=1)
+
+    assert [item.relative_path for item in found] == ["root.xlsx"]
+
+
+def test_recursive_discovery_honors_relative_ignore_patterns(tmp_path: Path) -> None:
+    create_workbook(tmp_path / "root.xlsx")
+    create_workbook(tmp_path / "2008" / "included.xlsx")
+    create_workbook(tmp_path / "archive" / "ignored.xlsx")
+    create_workbook(tmp_path / "2009" / "private" / "ignored.xlsm", macro_enabled=True)
+    source = SourceConfig(
+        id="example",
+        path=tmp_path,
+        recursive=True,
+        include=("*.xlsx", "*.xlsm"),
+        ignore=("archive/**", "private"),
+        note_root=tmp_path / "notes",
+    )
+
+    found = discover_workbooks(source, max_text_chars=1)
+
+    assert [item.relative_path for item in found] == ["2008/included.xlsx", "root.xlsx"]
