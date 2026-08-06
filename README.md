@@ -262,12 +262,15 @@ do not modify workbooks, notes, synchronization state, or cache.
 Workbook writes:
 
 - support `.xlsx` and `.xlsm` only;
-- create a backup before replacement;
+- create a backup before overwriting the workbook;
+- build replacement OOXML under the application OS temporary directory;
 - rewrite only selected OOXML metadata package entries;
 - preserve VBA and unrelated ZIP entries;
-- validate ZIP integrity and reread written properties;
+- validate ZIP integrity and reread properties before and after overwriting;
+- overwrite the existing file contents without replacing the file itself, preserving file identity and creation time across platforms;
+- restore the backup contents and timestamps if overwriting or post-write validation fails;
 - refuse digitally signed OOXML packages;
-- fail when a locked source cannot be safely replaced.
+- fail when a locked source cannot be safely overwritten.
 
 Encrypted workbooks, `.xls`, `.xlsb`, deletion synchronization, format conversion,
 and workbook layout/shape semantics are outside the MVP. Extracted cell text is a

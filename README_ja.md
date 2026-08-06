@@ -257,12 +257,15 @@ base stateは`~/.tkn/excel_catalog_pipeline/state/sync-state.json`、backupは�
 workbook writeは次の契約です。
 
 - `.xlsx` / `.xlsm`だけを正式対応する。
-- replace前にbackupする。
+- workbookの上書き前にbackupする。
+- application用のOS一時directoryで置換用OOXMLを構築する。
 - 選択したOOXML metadata entryだけを書き換える。
 - VBAと無関係なZIP entryを保持する。
-- ZIP integrityと書き込み後metadataを再検証する。
+- 上書き前後にZIP integrityとmetadataを再検証する。
+- file自体を置換せず既存fileの内容だけを上書きし、OSを問わずfile identityと作成日時を保持する。
+- 上書きまたは書き込み後検証に失敗した場合は、backupの内容と日時を復元する。
 - digital signature付きOOXML packageはwrite拒否する。
-- lock中sourceを安全にreplaceできなければ失敗にする。
+- lock中sourceを安全に上書きできなければ失敗にする。
 
 暗号化workbook、`.xls`、`.xlsb`、削除同期、format変換、図形や二次元layoutの意味解析は
 MVP対象外です。cell text抽出は検索補助であり、内容の完全表現ではありません。

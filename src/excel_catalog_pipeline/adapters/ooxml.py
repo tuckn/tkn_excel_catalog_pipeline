@@ -21,6 +21,7 @@ from xml.etree import ElementTree as ET
 
 from ..discovery import is_source_path_in_scope
 from ..models import SourceConfig, WorkbookInfo
+from ..paths import temporary_root
 
 OOXML_EXTENSIONS = {".xlsx", ".xlsm"}
 CORE_PATH = "docProps/core.xml"
@@ -67,6 +68,10 @@ ET.register_namespace("", CUSTOM_NS)
 
 class WorkbookError(ValueError):
     """Workbook is unsupported, invalid, locked, or unsafe to update."""
+
+
+def _temporary_workbook_path(directory: Path, role: str) -> Path:
+    return directory / f".excel-catalog-{role}-{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp"
 
 
 def local_name(tag: str) -> str:
@@ -412,6 +417,28 @@ def _unique_backup_path(backup_dir: Path, workbook_path: Path) -> Path:
     return backup_dir / f"{workbook_path.stem}--{suffix}{workbook_path.suffix}"
 
 
+def _verify_properties(path: Path, core: dict[str, str], custom: dict[str, str]) -> None:
+    with zipfile.ZipFile(path) as check:
+        bad_entry = check.testzip()
+        if bad_entry:
+            raise WorkbookError(f"Written ZIP integrity check failed at {bad_entry}")
+        written_core = read_core_properties(check)
+        written_custom = read_custom_properties(check)
+    if any(written_core.get(key, "") != value for key, value in core.items()):
+        raise WorkbookError("Core property verification failed")
+    if any(written_custom.get(key, "") != value for key, value in custom.items()):
+        raise WorkbookError("Custom property verification failed")
+
+
+def _overwrite_file_contents(source_path: Path, target_path: Path) -> None:
+    with source_path.open("rb") as source, target_path.open("r+b") as target:
+        target.seek(0)
+        shutil.copyfileobj(source, target, length=1024 * 1024)
+        target.truncate()
+        target.flush()
+        os.fsync(target.fileno())
+
+
 def write_properties(
     workbook_path: Path,
     *,
@@ -419,7 +446,7 @@ def write_properties(
     custom: dict[str, str] | None = None,
     backup_dir: Path,
 ) -> Path:
-    """Update selected properties through a same-directory temporary ZIP and atomic replace."""
+    """Build and verify replacement OOXML before replacing the workbook."""
     core = core or {}
     custom = custom or {}
     if workbook_path.suffix.lower() not in OOXML_EXTENSIONS:
@@ -427,10 +454,11 @@ def write_properties(
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup_path = _unique_backup_path(backup_dir, workbook_path)
     shutil.copy2(workbook_path, backup_path)
-    temp_path = workbook_path.with_name(
-        f".{workbook_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
-    )
+    staging_dir = temporary_root()
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = _temporary_workbook_path(staging_dir, "replacement")
     modified = datetime.now().astimezone().replace(microsecond=0).isoformat()
+    overwrite_started = False
     try:
         with zipfile.ZipFile(workbook_path, "r") as source:
             names = source.namelist()
@@ -460,20 +488,22 @@ def write_properties(
                         target.writestr(item, source.read(item.filename))
                 for name, data in replacements.items():
                     target.writestr(name, data)
-        with zipfile.ZipFile(temp_path) as check:
-            bad_entry = check.testzip()
-            if bad_entry:
-                raise WorkbookError(f"Written ZIP integrity check failed at {bad_entry}")
-            written_core = read_core_properties(check)
-            written_custom = read_custom_properties(check)
-        if any(written_core.get(key, "") != value for key, value in core.items()):
-            raise WorkbookError("Core property verification failed")
-        if any(written_custom.get(key, "") != value for key, value in custom.items()):
-            raise WorkbookError("Custom property verification failed")
-        temp_path.replace(workbook_path)
-    except Exception:
-        temp_path.unlink(missing_ok=True)
+        _verify_properties(temp_path, core, custom)
+        overwrite_started = True
+        _overwrite_file_contents(temp_path, workbook_path)
+        _verify_properties(workbook_path, core, custom)
+    except Exception as exc:
+        if overwrite_started:
+            try:
+                _overwrite_file_contents(backup_path, workbook_path)
+                shutil.copystat(backup_path, workbook_path)
+            except OSError as rollback_error:
+                raise WorkbookError(
+                    f"Workbook write failed ({exc}); rollback failed: {rollback_error}"
+                ) from rollback_error
         raise
+    finally:
+        temp_path.unlink(missing_ok=True)
     return backup_path
 
 
