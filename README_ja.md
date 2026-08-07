@@ -214,18 +214,32 @@ excel-catalog adopt --write-excel
 
 | Markdown代理ノート | Excel core property            |
 | ------------------ | ------------------------------ |
-| `schemaVersion: "1.0"` | 現行の代理note Frontmatter契約。workbook metadataではない |
+| `schemaVersion: "2.0"` | 現行の代理note Frontmatter契約。workbook metadataではない |
 | `title`          | Title                          |
-| `description`    | Comments / description         |
-| `nouns[0]`       | Categories / category          |
-| `nouns[1..]`     | Tags / keywords                |
+| `subject`        | Subject                        |
+| `author`         | Author / creatorを単一文字列で保持 |
+| `keywords[]`     | Keywords / tags                |
+| `categories[]`   | Category / categories          |
+| `comments`       | Comments / description         |
+| `sourceCreated`  | Created。source-ownedかつpull専用 |
+| `sourceModified` | Modified。source-ownedかつpull専用 |
 | `sourceFileName` | source root基準の相対workbook path。編集時は明示rename/move要求 |
+
+`description`は代理ノート専用の任意説明で、Excelへpushしません。Frontmatterのlist値は
+quote付きObsidian linkとして保持し、Excelへはlink記法を外して`; `で結合します。
+commaはtermの一部として保持します。`sourceCreated`と`sourceModified`は`pull`でのみ
+更新し、`push`では現在のnote値を無視・保持します。
+生成する`type`、source日時、`date`、`updated`、`noteId`の値はquoteなしのplain YAML
+scalarとし、`schemaVersion`はquote付き文字列のまま保持します。
 
 代理ノート名は`<workbook-name>.xlsx.md`または`<workbook-name>.xlsm.md`です。再帰探索時はsourceの相対folder構造をnotes root配下に再現します。生成管理する
 本文sectionは`excel-catalog` markerで囲みます。未知のFrontmatter fieldとmarker外の
-手書き本文は保持します。
-`schemaVersion`がないlegacy代理noteも引き続き読めます。review後の明示的なnote書込みで
-現profileのversionを追加し、dry-runではnoteを変更しません。
+手書き本文は保持します。workbook core metadataとstable custom IDはFrontmatterに置くため、
+schema 2.0では`## Excel Metadata`を生成せず、明示的なnote書込み時に旧managed sectionを
+削除します。
+`schemaVersion`がない、またはschema 1.0の`noun` / `nouns`を使うlegacy代理noteも
+引き続き読めます。review後の明示的なnote書込みで現profileのversionを追加し、dry-runでは
+noteを変更しません。
 
 生成Frontmatter契約と本文構造（`schemaVersion`、見出し、section順、default description）は、application-owned profile
 `src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md`をsource of truthとします。

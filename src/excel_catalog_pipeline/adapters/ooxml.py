@@ -42,6 +42,8 @@ CUSTOM_REL_TYPE = f"{OFFICE_REL_NS}/custom-properties"
 CUSTOM_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.custom-properties+xml"
 CORE_TAGS = {
     "title": (DC_NS, "title"),
+    "subject": (DC_NS, "subject"),
+    "creator": (DC_NS, "creator"),
     "description": (DC_NS, "description"),
     "category": (CP_NS, "category"),
     "keywords": (CP_NS, "keywords"),

@@ -7,7 +7,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-METADATA_FIELDS = ("title", "description", "category", "keywords", "sourceFileName")
+METADATA_FIELDS = (
+    "title",
+    "subject",
+    "author",
+    "keywords",
+    "categories",
+    "comments",
+    "sourceFileName",
+)
+CORE_PROPERTY_BY_METADATA_FIELD = {
+    "title": "title",
+    "subject": "subject",
+    "author": "creator",
+    "keywords": "keywords",
+    "categories": "category",
+    "comments": "description",
+}
 Direction = Literal[
     "unchanged",
     "pull",
@@ -22,8 +38,6 @@ def _canonical_terms(value: str) -> str:
     if not normalized:
         return ""
     parts = re.split(r"[;\r\n]+", normalized)
-    if len(parts) == 1:
-        parts = re.split(r",+", normalized)
     return "; ".join(dict.fromkeys(part.strip() for part in parts if part.strip()))
 
 
@@ -83,9 +97,11 @@ class WorkbookInfo:
     def metadata(self) -> dict[str, str]:
         return {
             "title": self.core.get("title", ""),
-            "description": self.core.get("description", ""),
-            "category": _canonical_terms(self.core.get("category", "")),
+            "subject": self.core.get("subject", ""),
+            "author": self.core.get("creator", ""),
             "keywords": _canonical_terms(self.core.get("keywords", "")),
+            "categories": _canonical_terms(self.core.get("category", "")),
+            "comments": self.core.get("description", ""),
             "sourceFileName": self.relative_path,
         }
 

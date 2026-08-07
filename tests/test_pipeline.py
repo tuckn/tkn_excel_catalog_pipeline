@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import excel_catalog_pipeline.pipeline as pipeline_module
-from excel_catalog_pipeline.adapters.markdown import NoteError
-from excel_catalog_pipeline.adapters.ooxml import write_properties
+from excel_catalog_pipeline.adapters.markdown import NoteError, read_note
+from excel_catalog_pipeline.adapters.ooxml import inspect_workbook, write_properties
 from excel_catalog_pipeline.config import validate_config
 from excel_catalog_pipeline.pipeline import run_pull, run_push
 
@@ -89,8 +89,6 @@ def test_push_detects_note_only_change_and_writes_backup(monkeypatch, tmp_path: 
     assert observed_actions == applied
     assert written_actions == applied
     assert backup is not None and any(backup.iterdir())
-    from excel_catalog_pipeline.adapters.ooxml import inspect_workbook
-
     assert (
         inspect_workbook(workbook_path, config.sources[0], max_text_chars=1).core["title"]
         == "Human title"
@@ -122,8 +120,6 @@ def test_push_preserves_repeated_title_whitespace(monkeypatch, tmp_path: Path) -
         note_filters=(),
     )
     assert [action.status for action in actions] == ["written"]
-    from excel_catalog_pipeline.adapters.ooxml import inspect_workbook
-
     assert (
         inspect_workbook(workbook_path, config.sources[0], max_text_chars=1).core["title"]
         == "Human  title"
@@ -137,6 +133,61 @@ def test_push_preserves_repeated_title_whitespace(monkeypatch, tmp_path: Path) -
         note_filters=(),
     )
     assert [action.status for action in again] == ["unchanged"]
+
+
+def test_push_writes_editable_core_fields_but_preserves_pull_only_source_dates(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    workbook_path = create_workbook(tmp_path / "workbooks" / "book.xlsx")
+    config = app_config(tmp_path)
+    state = tmp_path / "state.json"
+    backup_root = tmp_path / "application-state"
+    monkeypatch.setattr(pipeline_module, "state_path", lambda: state)
+    monkeypatch.setattr(pipeline_module, "state_root", lambda: backup_root)
+    run_pull(config, config.sources, write_notes=True, preference=None)
+    note_path = tmp_path / "notes" / "book.xlsx.md"
+    text = note_path.read_text(encoding="utf-8")
+    replacements = {
+        "subject: Example subject": "subject: Human subject",
+        "author: Example author": "author: Human author",
+        "- '[[Excel]]'": "- '[[Excel metadata]]'",
+        "- '[[Engineer, Myself]]'": "- '[[Workbook]]'",
+        "comments: Example description": "comments: Human comments",
+        "sourceCreated: 2025-12-01T00:00:00Z": "sourceCreated: 2000-01-01T00:00:00Z",
+        "sourceModified: 2026-01-01T00:00:00+09:00": (
+            "sourceModified: 2000-01-02T00:00:00Z"
+        ),
+    }
+    for old, new in replacements.items():
+        assert old in text
+        text = text.replace(old, new)
+    note_path.write_text(text, encoding="utf-8")
+
+    actions, _ = run_push(
+        config,
+        config.sources,
+        write_excel=True,
+        allow_rename=False,
+        preference=None,
+        note_filters=(),
+    )
+    assert [action.status for action in actions] == ["written"]
+    core = inspect_workbook(workbook_path, config.sources[0], max_text_chars=1).core
+    assert core["subject"] == "Human subject"
+    assert core["creator"] == "Human author"
+    assert core["keywords"] == "Excel metadata; Catalog"
+    assert core["category"] == "Workbook"
+    assert core["description"] == "Human comments"
+
+    after_push = read_note(note_path)
+    assert after_push.frontmatter["sourceCreated"] == "2000-01-01T00:00:00Z"
+    assert after_push.frontmatter["sourceModified"] == "2000-01-02T00:00:00Z"
+
+    pulled = run_pull(config, config.sources, write_notes=True, preference=None)
+    assert [action.status for action in pulled] == ["updated"]
+    after_pull = read_note(note_path)
+    assert after_pull.frontmatter["sourceCreated"] == core["created"]
+    assert after_pull.frontmatter["sourceModified"] == core["modified"]
 
 
 def test_source_rename_is_detected_by_stable_id(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

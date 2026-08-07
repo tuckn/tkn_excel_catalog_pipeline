@@ -23,6 +23,33 @@ from ..note_resources import (
 )
 
 WINDOWS_PATH_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
+YAML_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
+OBSOLETE_FRONTMATTER_FIELDS = {"noun", "nouns"}
+
+
+class FrontmatterLoader(yaml.SafeLoader):
+    """Load plain ISO timestamps as strings so proxy-note values remain stable."""
+
+
+class FrontmatterDumper(yaml.SafeDumper):
+    """Emit ISO timestamp strings without adding YAML quotes."""
+
+
+def _without_timestamp_resolver(
+    resolvers: dict[str | None, list[tuple[str, re.Pattern[str]]]],
+) -> dict[str | None, list[tuple[str, re.Pattern[str]]]]:
+    return {
+        key: [(tag, pattern) for tag, pattern in values if tag != YAML_TIMESTAMP_TAG]
+        for key, values in resolvers.items()
+    }
+
+
+FrontmatterLoader.yaml_implicit_resolvers = _without_timestamp_resolver(
+    FrontmatterLoader.yaml_implicit_resolvers
+)
+FrontmatterDumper.yaml_implicit_resolvers = _without_timestamp_resolver(
+    FrontmatterDumper.yaml_implicit_resolvers
+)
 
 
 class NoteError(ValueError):
@@ -41,7 +68,7 @@ def read_note(path: Path) -> ProxyNote:
     if not match:
         raise NoteError(f"Invalid Frontmatter fence: {path}")
     try:
-        loaded = yaml.safe_load(match.group(1)) or {}
+        loaded = yaml.load(match.group(1), Loader=FrontmatterLoader) or {}
     except yaml.YAMLError as exc:
         raise NoteError(f"Invalid Frontmatter YAML in {path}: {exc}") from exc
     if not isinstance(loaded, dict):
@@ -79,6 +106,10 @@ def _frontmatter_list(value: Any) -> list[str]:
     return []
 
 
+def _frontmatter_string(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
 def _link_target(value: str) -> str:
     text = value.strip()
     if text.startswith("[[") and text.endswith("]]"):
@@ -103,32 +134,46 @@ def _split_terms(value: str) -> list[str]:
     if not normalized:
         return []
     parts = re.split(r"[;\r\n]+", normalized)
-    if len(parts) == 1:
-        parts = re.split(r",+", normalized)
     return _dedupe(part.strip() for part in parts if part.strip())
 
 
-def metadata_to_nouns(category: str, keywords: str) -> list[str]:
-    category_terms = _split_terms(category)
-    category_link = f"[[{', '.join(category_terms)}]]" if category_terms else ""
-    keyword_links = [f"[[{term}]]" for term in _split_terms(keywords)]
-    return _dedupe([category_link, *keyword_links])
+def metadata_to_links(value: str) -> list[str]:
+    return [f"[[{term}]]" for term in _split_terms(value)]
+
+
+def _frontmatter_terms(value: Any) -> str:
+    terms: list[str] = []
+    for item in _frontmatter_list(value):
+        terms.extend(_split_terms(_link_target(item)))
+    return "; ".join(_dedupe(terms))
 
 
 def note_metadata(note: ProxyNote) -> dict[str, str]:
-    nouns = _frontmatter_list(note.frontmatter.get("nouns"))
-    legacy = str(note.frontmatter.get("noun", "")).strip()
-    if legacy:
-        nouns = _dedupe([legacy, *nouns])
-    targets = [_link_target(item) for item in nouns]
-    category = "; ".join(_split_terms(targets[0])) if targets else ""
-    keywords = "; ".join(_dedupe(item for item in targets[1:] if item))
+    schema_version = _frontmatter_string(note.frontmatter.get("schemaVersion"))
+    uses_v2_metadata = schema_version == "2.0" or any(
+        field in note.frontmatter for field in ("subject", "author", "categories", "comments")
+    )
+    if uses_v2_metadata:
+        categories = _frontmatter_terms(note.frontmatter.get("categories"))
+        keywords = _frontmatter_terms(note.frontmatter.get("keywords"))
+    else:
+        nouns = _frontmatter_list(note.frontmatter.get("nouns"))
+        legacy = str(note.frontmatter.get("noun", "")).strip()
+        if legacy:
+            nouns = _dedupe([legacy, *nouns])
+        targets = [_link_target(item) for item in nouns]
+        categories = _frontmatter_terms(targets[:1])
+        keywords = _frontmatter_terms(targets[1:])
     return {
-        "title": str(note.frontmatter.get("title", "")),
-        "description": str(note.frontmatter.get("description", "")),
-        "category": category,
+        "title": _frontmatter_string(note.frontmatter.get("title")),
+        "subject": _frontmatter_string(note.frontmatter.get("subject")),
+        "author": _frontmatter_string(note.frontmatter.get("author")),
         "keywords": keywords,
-        "sourceFileName": str(note.frontmatter.get("sourceFileName", "")),
+        "categories": categories,
+        "comments": _frontmatter_string(
+            note.frontmatter.get("comments", note.frontmatter.get("description", ""))
+        ),
+        "sourceFileName": _frontmatter_string(note.frontmatter.get("sourceFileName")),
     }
 
 
@@ -207,24 +252,6 @@ def _render_text(workbook: WorkbookInfo) -> str:
     return "\n".join(sections).rstrip()
 
 
-def _render_excel_metadata(workbook: WorkbookInfo) -> str:
-    lines: list[str] = []
-    if workbook.core:
-        lines.extend(["### Core", ""])
-        lines.extend(f"- {key}: {value}" for key, value in workbook.core.items())
-    if workbook.custom:
-        if lines:
-            lines.append("")
-        lines.extend(["### Custom", ""])
-        lines.extend(f"- {key}: {value}" for key, value in workbook.custom.items())
-    if workbook.warnings:
-        if lines:
-            lines.append("")
-        lines.extend(["### Warnings", ""])
-        lines.extend(f"- {warning}" for warning in workbook.warnings)
-    return "\n".join(lines) if lines else "No Excel document metadata extracted."
-
-
 def note_filename(workbook: WorkbookInfo) -> str:
     invalid = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
     stem = invalid.sub(" ", workbook.path.stem)
@@ -246,7 +273,7 @@ def _merge_frontmatter(rendered: dict[str, Any], existing: dict[str, Any]) -> di
     unknown_before: dict[str, list[tuple[str, Any]]] = {}
     pending: list[tuple[str, Any]] = []
     for key, value in existing.items():
-        if key == "noun":
+        if key in OBSOLETE_FRONTMATTER_FIELDS:
             continue
         if key in rendered:
             if pending:
@@ -270,25 +297,47 @@ def render_note(
     metadata: dict[str, str] | None = None,
     existing: ProxyNote | None = None,
     touch_updated: bool = True,
+    refresh_source_properties: bool = True,
 ) -> str:
     timestamp = now_iso()
     values = metadata or workbook.metadata()
     existing_frontmatter = dict(existing.frontmatter) if existing else {}
     title = values["title"] or workbook.path.stem
-    description = values["description"]
     stable_part = workbook.workbook_id or workbook.relative_path
 
     try:
         template = load_note_template(source.profile)
+        current_schema = _frontmatter_string(existing_frontmatter.get("schemaVersion"))
+        description = (
+            _frontmatter_string(existing_frontmatter.get("description"))
+            if current_schema == template.schema_version
+            else ""
+        )
+        source_created = (
+            workbook.core.get("created", "")
+            if refresh_source_properties
+            else _frontmatter_string(existing_frontmatter.get("sourceCreated"))
+        )
+        source_modified = (
+            workbook.core.get("modified", "")
+            if refresh_source_properties
+            else _frontmatter_string(existing_frontmatter.get("sourceModified"))
+        )
         rendered_template = template.render(
             {
                 "title": title,
                 "description": description,
-                "nouns": metadata_to_nouns(values["category"], values["keywords"]),
+                "subject": values["subject"],
+                "author": values["author"],
+                "keywords": metadata_to_links(values["keywords"]),
+                "categories": metadata_to_links(values["categories"]),
+                "comments": values["comments"],
                 "files": existing_frontmatter.get("files", []),
                 "source_root": source.id,
                 "source_file_name": values["sourceFileName"],
                 "source_id": f"{source.id}:{stable_part}",
+                "source_created": source_created,
+                "source_modified": source_modified,
                 "date": existing_frontmatter.get("date", timestamp),
                 "updated": (
                     timestamp
@@ -299,7 +348,6 @@ def render_note(
                 "workbook_path": f"`{workbook.path}`",
                 "workbook_map": _render_map(workbook),
                 "extracted_text": _render_text(workbook),
-                "excel_metadata": _render_excel_metadata(workbook),
             }
         )
         sections = managed_blocks(rendered_template.body, template)
@@ -309,13 +357,21 @@ def render_note(
     frontmatter = _merge_frontmatter(rendered_template.frontmatter, existing_frontmatter)
 
     if existing:
-        body = existing.body
+        body = _marker_pattern("excel-metadata").sub("", existing.body)
+        body = re.sub(
+            r"^##\s+Excel Metadata\s*$\r?\n.*?(?=^##\s+|\Z)",
+            "",
+            body,
+            count=1,
+            flags=re.MULTILINE | re.DOTALL,
+        )
         for section in sections:
             body = _replace_managed(body, section)
     else:
         body = rendered_template.body.rstrip() + "\n"
-    yaml_text = yaml.safe_dump(
+    yaml_text = yaml.dump(
         frontmatter,
+        Dumper=FrontmatterDumper,
         allow_unicode=True,
         sort_keys=False,
         default_flow_style=False,

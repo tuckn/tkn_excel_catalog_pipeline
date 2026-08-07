@@ -9,7 +9,7 @@ from typing import Any
 
 from .models import ProxyNote, WorkbookInfo
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 
 class StateError(ValueError):
@@ -27,6 +27,26 @@ def load_state(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as exc:
         raise StateError(f"Failed to read sync state {path}: {exc}") from exc
+    if isinstance(data, dict) and data.get("schemaVersion") == 1:
+        entries = data.get("entries")
+        if not isinstance(entries, dict):
+            raise StateError("sync state entries must be a mapping")
+        for entry in entries.values():
+            if not isinstance(entry, dict):
+                continue
+            base = entry.get("baseMetadata")
+            if not isinstance(base, dict):
+                continue
+            entry["baseMetadata"] = {
+                "title": str(base.get("title", "")),
+                "subject": "",
+                "author": "",
+                "keywords": str(base.get("keywords", "")),
+                "categories": str(base.get("category", "")),
+                "comments": str(base.get("description", "")),
+                "sourceFileName": str(base.get("sourceFileName", "")),
+            }
+        data["schemaVersion"] = STATE_VERSION
     if not isinstance(data, dict) or data.get("schemaVersion") != STATE_VERSION:
         raise StateError(
             f"Unsupported sync state schema: {data.get('schemaVersion') if isinstance(data, dict) else None!r}"

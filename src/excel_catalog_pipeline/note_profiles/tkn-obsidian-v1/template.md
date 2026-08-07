@@ -1,13 +1,19 @@
 ---
 type: Excel
-schemaVersion: "1.0"
+schemaVersion: "2.0"
 title: {{ title }}
 description: {{ description }}
-nouns: {{ nouns }}
+subject: {{ subject }}
+author: {{ author }}
+keywords: {{ keywords }}
+categories: {{ categories }}
+comments: {{ comments }}
 files: {{ files }}
 sourceRoot: {{ source_root }}
 sourceFileName: {{ source_file_name }}
 sourceId: {{ source_id }}
+sourceCreated: {{ source_created }}
+sourceModified: {{ source_modified }}
 date: {{ date }}
 updated: {{ updated }}
 noteId: {{ note_id }}
@@ -36,9 +42,3 @@ noteId: {{ note_id }}
 
 {{ extracted_text }}
 <!-- excel-catalog:end extracted-text -->
-
-<!-- excel-catalog:begin excel-metadata -->
-## Excel Metadata
-
-{{ excel_metadata }}
-<!-- excel-catalog:end excel-metadata -->

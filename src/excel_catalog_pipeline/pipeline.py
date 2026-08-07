@@ -35,7 +35,14 @@ from .adapters.ooxml import (
     write_properties,
 )
 from .discovery import is_source_path_in_scope
-from .models import Action, AppConfig, ProxyNote, SourceConfig, WorkbookInfo
+from .models import (
+    CORE_PROPERTY_BY_METADATA_FIELD,
+    Action,
+    AppConfig,
+    ProxyNote,
+    SourceConfig,
+    WorkbookInfo,
+)
 from .paths import state_path, state_root
 from .state import find_entry, load_state, make_entry, replace_entry, save_state, state_key
 from .sync import (
@@ -674,7 +681,10 @@ def run_push(
                     if core_updates or custom:
                         backup = write_properties(
                             workbook.path,
-                            core=core_updates,
+                            core={
+                                CORE_PROPERTY_BY_METADATA_FIELD[field]: value
+                                for field, value in core_updates.items()
+                            },
                             custom=custom,
                             backup_dir=backup_dir,
                         )
@@ -706,6 +716,7 @@ def run_push(
                         source,
                         metadata=note_metadata(note),
                         existing=note,
+                        refresh_source_properties=False,
                     )
                     write_note_atomic(note.path, refreshed_note)
                     note = read_note(note.path)

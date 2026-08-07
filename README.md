@@ -216,18 +216,32 @@ excel-catalog adopt --write-excel
 
 | Markdown proxy note | Excel core property                   |
 | ------------------- | ------------------------------------- |
-| `schemaVersion: "1.0"` | Current proxy-note Frontmatter contract; not workbook metadata |
+| `schemaVersion: "2.0"` | Current proxy-note Frontmatter contract; not workbook metadata |
 | `title`           | Title                                 |
-| `description`     | Comments / description                |
-| `nouns[0]`        | Categories / category                 |
-| `nouns[1..]`      | Tags / keywords                       |
+| `subject`         | Subject                               |
+| `author`          | Author / creator as one string        |
+| `keywords[]`      | Keywords / tags                       |
+| `categories[]`    | Category / categories                 |
+| `comments`        | Comments / description                |
+| `sourceCreated`   | Created; source-owned and pull-only   |
+| `sourceModified`  | Modified; source-owned and pull-only  |
 | `sourceFileName`  | Source-root-relative workbook path; editing it requests an explicit rename or move |
+
+`description` is an optional proxy-note description and is never pushed to Excel. List
+values use quoted Obsidian links in Frontmatter and are serialized to Excel as plain terms
+joined by `; `. Commas remain part of a term. `sourceCreated` and `sourceModified` are
+refreshed only by `pull`; `push` ignores and preserves their current note values.
+Generated `type`, source timestamps, `date`, `updated`, and `noteId` values use plain,
+unquoted YAML scalars. `schemaVersion` remains a quoted string.
 
 Proxy notes are named `<workbook-name>.xlsx.md` or `<workbook-name>.xlsm.md`. Recursive discovery mirrors the source-relative folder structure below the notes root.
 Generated body sections are enclosed by `excel-catalog` markers. Unknown Frontmatter
-fields and text outside those markers are preserved.
-Legacy proxy notes without `schemaVersion` remain readable. A reviewed, explicit note
-write adds the current profile version; a dry run does not modify the note.
+fields and text outside those markers are preserved. Workbook core metadata and the stable
+custom ID live in Frontmatter, so schema 2.0 no longer generates `## Excel Metadata` and
+removes the legacy managed section on an explicit note write.
+Legacy proxy notes without `schemaVersion`, or with schema 1.0 `noun` / `nouns`, remain
+readable. A reviewed, explicit note write adds the current profile version; a dry run does
+not modify the note.
 
 The generated Frontmatter contract and body structure, including `schemaVersion`,
 headings, section order, and default description, are owned by the application profile at

@@ -8,9 +8,13 @@ def create_workbook(
     path: Path,
     *,
     title: str = "Example title",
+    subject: str = "Example subject",
+    creator: str = "Example author",
     description: str = "Example description",
     category: str = "Engineer, Myself",
     keywords: str = "Excel; Catalog",
+    created: str = "2025-12-01T00:00:00Z",
+    modified: str = "2026-01-01T00:00:00+09:00",
     workbook_id: str = "",
     macro_enabled: bool = False,
 ) -> Path:
@@ -19,9 +23,11 @@ def create_workbook(
  xmlns:dc="http://purl.org/dc/elements/1.1/"
  xmlns:dcterms="http://purl.org/dc/terms/"
  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
- <dc:title>{title}</dc:title><dc:description>{description}</dc:description>
+ <dc:title>{title}</dc:title><dc:subject>{subject}</dc:subject>
+ <dc:creator>{creator}</dc:creator><dc:description>{description}</dc:description>
  <cp:category>{category}</cp:category><cp:keywords>{keywords}</cp:keywords>
- <dcterms:modified xsi:type="dcterms:W3CDTF">2026-01-01T00:00:00+09:00</dcterms:modified>
+ <dcterms:created xsi:type="dcterms:W3CDTF">{created}</dcterms:created>
+ <dcterms:modified xsi:type="dcterms:W3CDTF">{modified}</dcterms:modified>
 </cp:coreProperties>"""
     content_type = (
         "application/vnd.ms-excel.sheet.macroEnabled.main+xml"
