@@ -20,36 +20,27 @@ metadataの検査にはExcel、Excel COM、Obsidianは不要です。Obsidianが
 
 ## インストール
 
-通常は、次のcommandでeditable installationを行います。例示している`C:\path\to\tkn_excel_catalog_pipeline`は、このrepositoryの実際のfolder pathへ置き換えてください。
+通常は、次のcommandでinstallします。例示している`C:\path\to\tkn_excel_catalog_pipeline`は、このrepositoryの実際のfolder pathへ置き換えてください。
 
 ```console
-uv tool install -e "C:\path\to\tkn_excel_catalog_pipeline"
+uv tool install "C:\path\to\tkn_excel_catalog_pipeline"
 excel-catalog config show
 ```
 
-`-e`（`--editable`）を指定すると、installされた`excel-catalog`はrepository内の
-source codeを直接参照します。そのため、通常のsource code変更や`git pull`の内容は、
-再installせずに反映されます。2つ目のcommandは、install後に現在の設定を表示し、
-CLI entry pointと設定解決が動作することを確認します。必要に応じて
-`excel-catalog --version`と`excel-catalog --help`も確認できます。
+このinstallationでは、install時点のcode、package resource、dependencyが`uv`の
+tool環境へ格納され、repository内の変更は自動反映されません。2つ目のcommandは、
+install後に現在の設定を表示し、CLI entry pointと設定解決が動作することを確認します。
+必要に応じて`excel-catalog --version`と`excel-catalog --help`も確認できます。
 
-repository folderを移動・renameした場合、dependencyを変更した場合、または
-`pyproject.toml`のpackage metadataやCLI entry pointを変更した場合は、editable
-installationを作り直します。
+`git pull`などでrepositoryを更新した後は、次のcommandで再インストールします。
 
 ```console
-uv tool install -e "C:\path\to\tkn_excel_catalog_pipeline" --force
+uv tool install "C:\path\to\tkn_excel_catalog_pipeline" --reinstall
 ```
 
-repository内の変更を自動反映しないnon-editable installationへ切り替える場合は、
-次のcommandを実行します。
-
-```console
-uv tool install "C:\path\to\tkn_excel_catalog_pipeline" --force
-```
-
-non-editable installationではinstall時点のcodeが使われます。`git pull`などで
-repositoryを更新した後は、同じcommandを再実行して変更を反映してください。
+`--reinstall`により、更新後のcode、package resource、dependencyをtool環境へ確実に
+反映します。`--force`はtool installation自体を強制しますが、同じversionのpackageを
+必ず再構築・再installするoptionではありません。
 
 ## 設定
 
@@ -251,6 +242,8 @@ validation、動的なworkbook内容の生成、安全なmarker置換を担当�
 前回一致時のbase、現在のworkbook、現在のnoteをfield単位で三方向比較します。双方が
 異なる値へ変わった場合は終了code `2`で停止し、mtimeによるlast-write-winsは行いません。
 review後に`--prefer-source`または`--prefer-note`を明示できます。
+部分的な`pull`または`push`の後は、workbookと代理noteが実際に一致したfieldだけbaseを
+更新します。反対方向に残る未同期変更は同期済みにせず、次のcommandへ引き継ぎます。
 
 rename・folder移動の検出方向、必要なoption、report先は「設定」の「rename・folder移動の設定」を参照してください。rename先はsource root内に収まり、現在と同じ拡張子で、Windows上有効かつ衝突しない相対pathである必要があります。
 
@@ -267,6 +260,9 @@ run report:
 
 base stateは`~/.tkn/excel_catalog_pipeline/state/sync-state.json`、backupは隣接する
 `backups/`です。dry-runはreportを作成しますが、workbook、note、state、cacheを変更しません。
+file別reportでは、`sourceToNoteFields`が`pull`でworkbookから代理noteへ反映するfield、
+`noteToSourceFields`が`push`で代理noteからworkbookへ反映するfieldを示します。
+`changedFields`は、そのreportを作成したcommandが反映または反映予定としたfieldです。
 
 workbook writeは次の契約です。
 

@@ -20,36 +20,28 @@ only relevant when proxy-note renames must update backlinks.
 
 ## Install
 
-The normal installation is editable. Replace
+For normal use, install the tool with the following command. Replace
 `C:\path\to\tkn_excel_catalog_pipeline` with the actual repository folder.
 
 ```console
-uv tool install -e "C:\path\to\tkn_excel_catalog_pipeline"
+uv tool install "C:\path\to\tkn_excel_catalog_pipeline"
 excel-catalog config show
 ```
 
-With `-e` (`--editable`), the installed `excel-catalog` directly references the
-repository source. Normal source changes and `git pull` updates therefore take effect
-without reinstalling. The second command verifies the CLI entry point and effective
+This installs the current code, package resources, and dependencies into the
+`uv`-managed tool environment. Later repository changes are not reflected
+automatically. The second command verifies the CLI entry point and effective
 configuration. You can also run `excel-catalog --version` and `excel-catalog --help`.
 
-Recreate the editable installation after moving or renaming the repository folder,
-changing dependencies, or changing package metadata or the CLI entry point in
-`pyproject.toml`:
+After `git pull` or another repository update, reinstall the tool:
 
 ```console
-uv tool install -e "C:\path\to\tkn_excel_catalog_pipeline" --force
+uv tool install "C:\path\to\tkn_excel_catalog_pipeline" --reinstall
 ```
 
-To use a non-editable installation that does not automatically reflect repository
-changes, run:
-
-```console
-uv tool install "C:\path\to\tkn_excel_catalog_pipeline" --force
-```
-
-A non-editable installation uses the code captured at installation time. Run the same
-command again after `git pull` or another repository update.
+`--reinstall` ensures that the updated code, package resources, and dependencies are
+installed into the tool environment. `--force` forces the tool installation itself,
+but does not guarantee that a package with the same version is rebuilt and reinstalled.
 
 ## Configure
 
@@ -255,6 +247,9 @@ Synchronization uses field-level three-way comparison between the previous base,
 current workbook, and current note. Different changes on both sides return exit code
 `2`; no last-write-wins rule is applied. After review, `--prefer-source` or
 `--prefer-note` can resolve that run explicitly.
+After a partial `pull` or `push`, the base advances only for fields whose workbook and
+proxy-note values actually agree. An unresolved change in the opposite direction is
+kept for the next command instead of being marked as synchronized.
 
 See “Configuring renames and folder moves” under “Configure” for the two detection directions, required options, and report locations. A rename target must be a valid, collision-free source-relative path that stays inside the source root and preserves the current workbook extension.
 
@@ -272,6 +267,10 @@ Run reports are stored under:
 Synchronization base state is `~/.tkn/excel_catalog_pipeline/state/sync-state.json`.
 Backups are under the adjacent `backups/` directory. Dry runs may create reports, but
 do not modify workbooks, notes, synchronization state, or cache.
+Per-file report rows distinguish direction explicitly: `sourceToNoteFields` lists
+workbook values to apply through `pull`, while `noteToSourceFields` lists proxy-note
+values to apply through `push`. `changedFields` lists the fields applied or planned by
+the command that produced the row.
 
 Workbook writes:
 

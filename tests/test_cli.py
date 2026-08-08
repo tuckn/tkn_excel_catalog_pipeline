@@ -62,6 +62,9 @@ sources:
     assert result == 0
     assert payload["statusCounts"] == {"would-create": 1}
     assert Path(payload["reportPath"], "summary.json").exists()
+    details = json.loads(Path(payload["reportPath"], "details.json").read_text(encoding="utf-8"))
+    assert details[0]["sourceToNoteFields"] == []
+    assert details[0]["noteToSourceFields"] == []
     assert not notes.exists()
 
 
@@ -109,9 +112,7 @@ sources:
         ]
 
     monkeypatch.setattr(cli_module, "run_status", fake_run_status)
-    result = main(
-        ["--config", str(config), "--report-dir", str(tmp_path / "reports"), "status"]
-    )
+    result = main(["--config", str(config), "--report-dir", str(tmp_path / "reports"), "status"])
     captured = capsys.readouterr()
 
     payload = json.loads(captured.out)

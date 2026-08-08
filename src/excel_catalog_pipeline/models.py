@@ -138,6 +138,8 @@ class Action:
     note_path: str = ""
     workbook_id: str = ""
     changed_fields: list[str] = field(default_factory=list)
+    source_to_note_fields: list[str] = field(default_factory=list)
+    note_to_source_fields: list[str] = field(default_factory=list)
     conflict_fields: list[str] = field(default_factory=list)
     message: str = ""
     details: dict[str, Any] = field(default_factory=dict)
@@ -150,6 +152,8 @@ class Action:
             "notePath": self.note_path,
             "workbookId": self.workbook_id,
             "changedFields": self.changed_fields,
+            "sourceToNoteFields": self.source_to_note_fields,
+            "noteToSourceFields": self.note_to_source_fields,
             "conflictFields": self.conflict_fields,
             "message": self.message,
             "details": self.details,

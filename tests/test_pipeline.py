@@ -95,6 +95,62 @@ def test_push_detects_note_only_change_and_writes_backup(monkeypatch, tmp_path: 
     )
 
 
+def test_partial_push_does_not_advance_base_for_source_only_change(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    workbook_path = create_workbook(tmp_path / "workbooks" / "book.xlsx")
+    config = app_config(tmp_path)
+    state = tmp_path / "state.json"
+    backup_root = tmp_path / "application-state"
+    monkeypatch.setattr(pipeline_module, "state_path", lambda: state)
+    monkeypatch.setattr(pipeline_module, "state_root", lambda: backup_root)
+    run_pull(config, config.sources, write_notes=True, preference=None)
+
+    write_properties(
+        workbook_path,
+        core={"creator": "Source author"},
+        backup_dir=tmp_path / "external-change-backup",
+    )
+    note_path = tmp_path / "notes" / "book.xlsx.md"
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8").replace(
+            "- '[[Engineer, Myself]]'", "- '[[Note category]]'"
+        ),
+        encoding="utf-8",
+    )
+
+    pushed, _ = run_push(
+        config,
+        config.sources,
+        write_excel=True,
+        allow_rename=False,
+        preference=None,
+        note_filters=(),
+    )
+    assert [action.status for action in pushed] == ["written"]
+    assert pushed[0].changed_fields == ["categories"]
+    assert pushed[0].source_to_note_fields == ["author"]
+    assert pushed[0].note_to_source_fields == ["categories"]
+
+    planned_pull = run_pull(config, config.sources, write_notes=False, preference=None)
+    assert [action.status for action in planned_pull] == ["would-update"]
+    assert planned_pull[0].changed_fields == ["author"]
+    assert planned_pull[0].source_to_note_fields == ["author"]
+    assert planned_pull[0].note_to_source_fields == []
+
+    run_pull(config, config.sources, write_notes=True, preference=None)
+    assert read_note(note_path).frontmatter["author"] == "Source author"
+    final_push, _ = run_push(
+        config,
+        config.sources,
+        write_excel=False,
+        allow_rename=False,
+        preference=None,
+        note_filters=(),
+    )
+    assert [action.status for action in final_push] == ["unchanged"]
+
+
 def test_push_preserves_repeated_title_whitespace(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     workbook_path = create_workbook(tmp_path / "workbooks" / "book.xlsx")
     config = app_config(tmp_path)
@@ -154,9 +210,7 @@ def test_push_writes_editable_core_fields_but_preserves_pull_only_source_dates(
         "- '[[Engineer, Myself]]'": "- '[[Workbook]]'",
         "comments: Example description": "comments: Human comments",
         "sourceCreated: 2025-12-01T00:00:00Z": "sourceCreated: 2000-01-01T00:00:00Z",
-        "sourceModified: 2026-01-01T00:00:00+09:00": (
-            "sourceModified: 2000-01-02T00:00:00Z"
-        ),
+        "sourceModified: 2026-01-01T00:00:00+09:00": ("sourceModified: 2000-01-02T00:00:00Z"),
     }
     for old, new in replacements.items():
         assert old in text

@@ -409,9 +409,9 @@ def run_pull(
                     source_path=workbook.relative_path,
                     note_path=str(note.path),
                     workbook_id=workbook.workbook_id,
-                    changed_fields=_dedupe_fields(
-                        [*pull_fields, *direction_fields(decisions, "push")]
-                    ),
+                    changed_fields=_dedupe_fields(pull_fields),
+                    source_to_note_fields=_dedupe_fields(pull_fields),
+                    note_to_source_fields=direction_fields(decisions, "push"),
                     message=f"stateMatch={matched_by}",
                 )
             )
@@ -659,6 +659,7 @@ def run_push(
                         note_path=str(note.path),
                         workbook_id=workbook.workbook_id,
                         changed_fields=direction_fields(decisions, "pull"),
+                        source_to_note_fields=direction_fields(decisions, "pull"),
                         message=f"stateMatch={matched_by}",
                     )
                 )
@@ -731,18 +732,19 @@ def run_push(
                         raise WorkbookError(
                             "Post-write verification mismatch: " + ", ".join(mismatches)
                         )
+                    synchronized_base = _baseline_after(base, final_source, final_note)
                     if entry:
                         entry_value = _update_existing_entry(
                             entry,
                             workbook,
                             note,
-                            base=final_source,
+                            base=synchronized_base,
                             result="pushed",
                             now=now,
                         )
                     else:
                         entry_value = make_entry(
-                            workbook, note, final_source, now=now, result="pushed"
+                            workbook, note, synchronized_base, now=now, result="pushed"
                         )
                     replace_entry(state, old_key=old_key, workbook=workbook, entry=entry_value)
                     state_changed = True
@@ -775,6 +777,8 @@ def run_push(
                             source_path=workbook.relative_path,
                             note_path=str(note.path),
                             changed_fields=changed_fields,
+                            source_to_note_fields=direction_fields(decisions, "pull"),
+                            note_to_source_fields=changed_fields,
                             message=message,
                             details={"backups": backup_paths},
                         )
@@ -787,6 +791,8 @@ def run_push(
                 note_path=str(note.path),
                 workbook_id=workbook.workbook_id,
                 changed_fields=changed_fields,
+                source_to_note_fields=direction_fields(decisions, "pull"),
+                note_to_source_fields=changed_fields,
                 details={"backups": backup_paths},
             )
             record(action)

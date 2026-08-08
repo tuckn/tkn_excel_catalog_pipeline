@@ -78,6 +78,8 @@ def write_report(
                 "notePath",
                 "workbookId",
                 "changedFields",
+                "sourceToNoteFields",
+                "noteToSourceFields",
                 "conflictFields",
                 "message",
                 "details",
@@ -89,6 +91,8 @@ def write_report(
                 {
                     **row,
                     "changedFields": ";".join(row["changedFields"]),
+                    "sourceToNoteFields": ";".join(row["sourceToNoteFields"]),
+                    "noteToSourceFields": ";".join(row["noteToSourceFields"]),
                     "conflictFields": ";".join(row["conflictFields"]),
                     "details": json.dumps(row["details"], ensure_ascii=False, sort_keys=True),
                 }
