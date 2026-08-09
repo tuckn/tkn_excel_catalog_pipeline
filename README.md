@@ -24,19 +24,23 @@ For normal use, install the tool with the following command. Replace
 `C:\path\to\tkn_excel_catalog_pipeline` with the actual repository folder.
 
 ```console
-uv tool install "C:\path\to\tkn_excel_catalog_pipeline"
-excel-catalog config show
+cd "C:\path\to\tkn_excel_catalog_pipeline"
+uv tool install .
+excel-catalog --help
 ```
 
 This installs the current code, package resources, and dependencies into the
 `uv`-managed tool environment. Later repository changes are not reflected
-automatically. The second command verifies the CLI entry point and effective
-configuration. You can also run `excel-catalog --version` and `excel-catalog --help`.
+automatically. The final command verifies the CLI entry point. Use
+`excel-catalog config show` to inspect the effective configuration and
+`excel-catalog --version` to check the version.
 
 After `git pull` or another repository update, reinstall the tool:
 
 ```console
-uv tool install "C:\path\to\tkn_excel_catalog_pipeline" --reinstall
+cd "C:\path\to\tkn_excel_catalog_pipeline"
+uv tool install . --reinstall
+excel-catalog --help
 ```
 
 `--reinstall` ensures that the updated code, package resources, and dependencies are
@@ -161,6 +165,23 @@ excel-catalog pull
 excel-catalog pull --write-notes
 ```
 
+Normal `pull` preserves metadata that appears to have been edited only in Markdown.
+After reviewing the dry-run report, use `--prefer-source` when Excel must be treated as
+authoritative for every differing metadata field, including recovery from incorrect
+historical synchronization state:
+
+```console
+excel-catalog pull --source example --prefer-source
+excel-catalog pull --source example --prefer-source --write-notes
+```
+
+Add global `-v` before the subcommand to print each metadata comparison. The same full
+values are written to `differences.csv`, one row per workbook field:
+
+```console
+excel-catalog -v pull --source example --prefer-source
+```
+
 Plan Markdown-to-Excel metadata changes, then apply reviewed workbook writes:
 
 ```console
@@ -247,6 +268,9 @@ Synchronization uses field-level three-way comparison between the previous base,
 current workbook, and current note. Different changes on both sides return exit code
 `2`; no last-write-wins rule is applied. After review, `--prefer-source` or
 `--prefer-note` can resolve that run explicitly.
+During `pull`, `--prefer-source` also replaces note-side-only metadata differences with
+the current workbook values. Without that explicit option, those note values are
+preserved so that an ordinary pull cannot silently discard a Markdown edit.
 After a partial `pull` or `push`, the base advances only for fields whose workbook and
 proxy-note values actually agree. An unresolved change in the opposite direction is
 kept for the next command instead of being marked as synchronized.
@@ -262,6 +286,7 @@ Run reports are stored under:
   summary.json
   actions.csv
   details.json
+  differences.csv
 ```
 
 Synchronization base state is `~/.tkn/excel_catalog_pipeline/state/sync-state.json`.
@@ -271,6 +296,9 @@ Per-file report rows distinguish direction explicitly: `sourceToNoteFields` list
 workbook values to apply through `pull`, while `noteToSourceFields` lists proxy-note
 values to apply through `push`. `changedFields` lists the fields applied or planned by
 the command that produced the row.
+`differences.csv` contains `baseValue`, `excelValue`, `noteValue`, the original
+three-way `direction`, and the explicit `plannedDirection`. This makes empty-value
+deletions and source-authoritative recovery reviewable without reading JSON.
 
 Workbook writes:
 
@@ -291,12 +319,14 @@ search aid, not a complete workbook representation.
 
 ## Console and exit codes
 
-Human-readable progress goes to stderr as `[LEVEL] message`. For `push`, this includes
+Human-readable progress goes to stderr as `[LEVEL] message`. Pull, push, and adopt end
+with an indented summary containing status counts and report paths. For `push`, progress includes
 the selected source configuration (`id`, workbook path, include patterns, and note
 settings), one result line as each non-unchanged file result is determined, and an
 indented final summary. Per-file lines use the note filename and relative `sourcePath`
 instead of repeating the full note path. Unchanged files appear only as a count in the summary.
-One compact JSON result still goes to stdout. Use `--quiet`, `--verbose`, or
+One compact JSON result still goes to stdout. `-v` / `--verbose` adds per-field Excel,
+Markdown, base, and planned-direction comparisons. Use `--quiet`, `--verbose`, or
 `--no-color`; `NO_COLOR` is honored.
 
 `status` groups counts by configured source. It lists only items that require attention,

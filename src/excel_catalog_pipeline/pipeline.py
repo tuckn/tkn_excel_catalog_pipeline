@@ -39,6 +39,7 @@ from .models import (
     CORE_PROPERTY_BY_METADATA_FIELD,
     Action,
     AppConfig,
+    FieldDecision,
     ProxyNote,
     SourceConfig,
     WorkbookInfo,
@@ -115,6 +116,36 @@ def _baseline_after(
         if note.get(field, "") == source_value:
             result[field] = source_value
     return result
+
+
+def _field_differences(
+    decisions: list[FieldDecision],
+    *,
+    source_to_note_fields: list[str] | None = None,
+    note_to_source_fields: list[str] | None = None,
+) -> list[dict[str, str]]:
+    source_to_note = set(source_to_note_fields or [])
+    note_to_source = set(note_to_source_fields or [])
+    differences: list[dict[str, str]] = []
+    for decision in decisions:
+        if decision.source == decision.note:
+            continue
+        planned_direction = ""
+        if decision.field in source_to_note:
+            planned_direction = "source-to-note"
+        elif decision.field in note_to_source:
+            planned_direction = "note-to-source"
+        differences.append(
+            {
+                "field": decision.field,
+                "direction": decision.direction,
+                "plannedDirection": planned_direction,
+                "baseValue": decision.base,
+                "excelValue": decision.source,
+                "noteValue": decision.note,
+            }
+        )
+    return differences
 
 
 def _update_existing_entry(
@@ -325,6 +356,7 @@ def run_pull(
                         note_path=str(note.path),
                         workbook_id=workbook.workbook_id,
                         conflict_fields=conflicts,
+                        field_differences=_field_differences(decisions),
                         message="Source and note changed differently from the base state.",
                         details={"matchedBy": matched_by},
                     )
@@ -341,7 +373,9 @@ def run_pull(
             current_text = note.path.read_text(encoding="utf-8-sig")
             pull_fields = direction_fields(decisions, "pull")
             if preference == "source":
-                pull_fields.extend(conflicts)
+                pull_fields = [
+                    decision.field for decision in decisions if decision.source != decision.note
+                ]
             desired_path = note_path(workbook, source)
             rename_needed = desired_path.resolve() != note.path.resolve()
             if rename_needed:
@@ -402,6 +436,10 @@ def run_pull(
                 replace_entry(state, old_key=old_key, workbook=workbook, entry=entry_value)
                 seen_state_keys.add(state_key(workbook))
                 state_changed = True
+            source_to_note_fields = _dedupe_fields(pull_fields)
+            note_to_source_fields = (
+                [] if preference == "source" else direction_fields(decisions, "push")
+            )
             actions.append(
                 Action(
                     status=status,
@@ -409,9 +447,14 @@ def run_pull(
                     source_path=workbook.relative_path,
                     note_path=str(note.path),
                     workbook_id=workbook.workbook_id,
-                    changed_fields=_dedupe_fields(pull_fields),
-                    source_to_note_fields=_dedupe_fields(pull_fields),
-                    note_to_source_fields=direction_fields(decisions, "push"),
+                    changed_fields=source_to_note_fields,
+                    source_to_note_fields=source_to_note_fields,
+                    note_to_source_fields=note_to_source_fields,
+                    field_differences=_field_differences(
+                        decisions,
+                        source_to_note_fields=source_to_note_fields,
+                        note_to_source_fields=note_to_source_fields,
+                    ),
                     message=f"stateMatch={matched_by}",
                 )
             )
@@ -572,6 +615,7 @@ def run_push(
                         note_path=str(note.path),
                         workbook_id=workbook.workbook_id,
                         conflict_fields=conflicts,
+                        field_differences=_field_differences(decisions),
                         message="Source and note changed differently from the base state.",
                     )
                 )
@@ -660,6 +704,10 @@ def run_push(
                         workbook_id=workbook.workbook_id,
                         changed_fields=direction_fields(decisions, "pull"),
                         source_to_note_fields=direction_fields(decisions, "pull"),
+                        field_differences=_field_differences(
+                            decisions,
+                            source_to_note_fields=direction_fields(decisions, "pull"),
+                        ),
                         message=f"stateMatch={matched_by}",
                     )
                 )
@@ -779,6 +827,11 @@ def run_push(
                             changed_fields=changed_fields,
                             source_to_note_fields=direction_fields(decisions, "pull"),
                             note_to_source_fields=changed_fields,
+                            field_differences=_field_differences(
+                                decisions,
+                                source_to_note_fields=direction_fields(decisions, "pull"),
+                                note_to_source_fields=changed_fields,
+                            ),
                             message=message,
                             details={"backups": backup_paths},
                         )
@@ -793,6 +846,11 @@ def run_push(
                 changed_fields=changed_fields,
                 source_to_note_fields=direction_fields(decisions, "pull"),
                 note_to_source_fields=changed_fields,
+                field_differences=_field_differences(
+                    decisions,
+                    source_to_note_fields=direction_fields(decisions, "pull"),
+                    note_to_source_fields=changed_fields,
+                ),
                 details={"backups": backup_paths},
             )
             record(action)

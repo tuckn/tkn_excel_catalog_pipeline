@@ -38,10 +38,10 @@ def resolve_for_pull(
 ) -> dict[str, str]:
     values: dict[str, str] = {}
     for decision in decisions:
-        if decision.direction == "conflict":
-            if preference == "source":
-                values[decision.field] = decision.source
-            elif preference == "note":
+        if preference == "source":
+            values[decision.field] = decision.source
+        elif decision.direction == "conflict":
+            if preference == "note":
                 values[decision.field] = decision.note
             else:
                 values[decision.field] = decision.note

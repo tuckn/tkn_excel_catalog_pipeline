@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -230,7 +231,93 @@ sources:
     ) in captured.err
     assert str(notes / "missing.xlsx.md") not in captured.err
     assert "two.xlsx" not in captured.err
-    assert "[INFO] Summary:\n{" in captured.err
-    assert '  "statusCounts": {' in captured.err
-    assert '    "unchanged": 1' in captured.err
+    assert "[INFO] Summary:\n  command: push" in captured.err
+    assert "  mode: write" in captured.err
+    assert "  status counts:\n    written: 1\n    unchanged: 1" in captured.err
+    assert "  differences CSV:" in captured.err
     assert payload["statusCounts"]["unchanged"] == 1
+
+
+def test_cli_pull_verbose_logs_values_and_writes_difference_csv(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f'''schema_version: 1
+sources:
+  - id: example
+    path: "{(tmp_path / "workbooks").as_posix()}"
+    include: ["**/*.xlsx"]
+    notes:
+      root: "{(tmp_path / "notes").as_posix()}"
+''',
+        encoding="utf-8",
+    )
+
+    def fake_run_pull(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return [
+            Action(
+                status="would-update",
+                source_root_id="example",
+                source_path="nested/book.xlsx",
+                note_path=str(tmp_path / "notes" / "nested" / "book.xlsx.md"),
+                changed_fields=["author"],
+                source_to_note_fields=["author"],
+                field_differences=[
+                    {
+                        "field": "author",
+                        "direction": "push",
+                        "plannedDirection": "source-to-note",
+                        "baseValue": "Example author",
+                        "excelValue": "Example author",
+                        "noteValue": "",
+                    }
+                ],
+            ),
+            Action(status="unchanged", source_root_id="example", source_path="same.xlsx"),
+        ]
+
+    monkeypatch.setattr(cli_module, "run_pull", fake_run_pull)
+    result = main(
+        [
+            "-v",
+            "--config",
+            str(config),
+            "--report-dir",
+            str(tmp_path / "reports"),
+            "pull",
+            "--prefer-source",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    payload = json.loads(captured.out)
+    assert result == 0
+    assert "[DEBUG] Metadata differences:" in captured.err
+    assert "[would-update] nested/book.xlsx" in captured.err
+    assert (
+        "author | Excel: Example author | Markdown: <empty> | "
+        "base: Example author | apply: Excel -> Markdown" in captured.err
+    )
+    assert "[INFO] Summary:\n  command: pull\n  mode: dry-run" in captured.err
+    assert "    would-update: 1\n    unchanged: 1" in captured.err
+
+    differences_path = Path(payload["differencesPath"])
+    assert differences_path.exists()
+    with differences_path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows == [
+        {
+            "status": "would-update",
+            "sourceRoot": "example",
+            "sourcePath": "nested/book.xlsx",
+            "notePath": str(tmp_path / "notes" / "nested" / "book.xlsx.md"),
+            "workbookId": "",
+            "field": "author",
+            "direction": "push",
+            "plannedDirection": "source-to-note",
+            "baseValue": "Example author",
+            "excelValue": "Example author",
+            "noteValue": "",
+        }
+    ]

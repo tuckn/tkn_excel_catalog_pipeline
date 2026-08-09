@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from excel_catalog_pipeline.sync import compare_metadata, direction_fields
+from excel_catalog_pipeline.sync import compare_metadata, direction_fields, resolve_for_pull
 
 
 def test_three_way_directions() -> None:
@@ -36,3 +36,6 @@ def test_three_way_directions() -> None:
     assert direction_fields(decisions, "push") == ["comments"]
     assert direction_fields(decisions, "converged") == ["categories"]
     assert direction_fields(decisions, "conflict") == ["keywords"]
+
+    resolved = resolve_for_pull(decisions, preference="source")
+    assert resolved == source

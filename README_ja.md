@@ -23,19 +23,22 @@ metadataの検査にはExcel、Excel COM、Obsidianは不要です。Obsidianが
 通常は、次のcommandでinstallします。例示している`C:\path\to\tkn_excel_catalog_pipeline`は、このrepositoryの実際のfolder pathへ置き換えてください。
 
 ```console
-uv tool install "C:\path\to\tkn_excel_catalog_pipeline"
-excel-catalog config show
+cd "C:\path\to\tkn_excel_catalog_pipeline"
+uv tool install .
+excel-catalog --help
 ```
 
 このinstallationでは、install時点のcode、package resource、dependencyが`uv`の
-tool環境へ格納され、repository内の変更は自動反映されません。2つ目のcommandは、
-install後に現在の設定を表示し、CLI entry pointと設定解決が動作することを確認します。
-必要に応じて`excel-catalog --version`と`excel-catalog --help`も確認できます。
+tool環境へ格納され、repository内の変更は自動反映されません。最後のcommandは、
+install後にCLI entry pointが動作することを確認します。現在の設定は
+`excel-catalog config show`、versionは`excel-catalog --version`で確認できます。
 
 `git pull`などでrepositoryを更新した後は、次のcommandで再インストールします。
 
 ```console
-uv tool install "C:\path\to\tkn_excel_catalog_pipeline" --reinstall
+cd "C:\path\to\tkn_excel_catalog_pipeline"
+uv tool install . --reinstall
+excel-catalog --help
 ```
 
 `--reinstall`により、更新後のcode、package resource、dependencyをtool環境へ確実に
@@ -159,6 +162,22 @@ excel-catalog pull
 excel-catalog pull --write-notes
 ```
 
+通常の`pull`は、Markdownだけで編集されたように見えるmetadataを上書きせず保持します。
+過去の誤った同期stateからの復旧など、Excelをすべての差分fieldの正とする場合は、
+dry-run reportを確認してから`--prefer-source`を明示します。
+
+```console
+excel-catalog pull --source example --prefer-source
+excel-catalog pull --source example --prefer-source --write-notes
+```
+
+subcommandの前にglobal option `-v`を付けると、metadataの比較値をfield単位で表示します。
+同じ完全な値は、workbookの1 fieldを1行とする`differences.csv`にも保存します。
+
+```console
+excel-catalog -v pull --source example --prefer-source
+```
+
 MarkdownからExcelへの変更を確認し、review後にbackup付きで適用:
 
 ```console
@@ -242,6 +261,9 @@ validation、動的なworkbook内容の生成、安全なmarker置換を担当�
 前回一致時のbase、現在のworkbook、現在のnoteをfield単位で三方向比較します。双方が
 異なる値へ変わった場合は終了code `2`で停止し、mtimeによるlast-write-winsは行いません。
 review後に`--prefer-source`または`--prefer-note`を明示できます。
+`pull`の`--prefer-source`は、note側だけが変更されたと判定されたmetadataも現在のworkbook値で
+置き換えます。このoptionがない通常の`pull`では、Markdown編集の黙示的な破棄を防ぐため、
+そのnote値を保持します。
 部分的な`pull`または`push`の後は、workbookと代理noteが実際に一致したfieldだけbaseを
 更新します。反対方向に残る未同期変更は同期済みにせず、次のcommandへ引き継ぎます。
 
@@ -256,6 +278,7 @@ run report:
   summary.json
   actions.csv
   details.json
+  differences.csv
 ```
 
 base stateは`~/.tkn/excel_catalog_pipeline/state/sync-state.json`、backupは隣接する
@@ -263,6 +286,9 @@ base stateは`~/.tkn/excel_catalog_pipeline/state/sync-state.json`、backupは�
 file別reportでは、`sourceToNoteFields`が`pull`でworkbookから代理noteへ反映するfield、
 `noteToSourceFields`が`push`で代理noteからworkbookへ反映するfieldを示します。
 `changedFields`は、そのreportを作成したcommandが反映または反映予定としたfieldです。
+`differences.csv`には`baseValue`、`excelValue`、`noteValue`、元の三方向判定
+`direction`、明示操作による`plannedDirection`を記録します。JSONを読まなくても、
+空欄による削除やExcelを正とした復旧内容を確認できます。
 
 workbook writeは次の契約です。
 
@@ -282,11 +308,13 @@ MVP対象外です。cell text抽出は検索補助であり、内容の完全�
 
 ## consoleと終了code
 
-人向け進捗はstderrへ`[LEVEL] message`として出します。`push`では、処理対象のsource ID、
+人向け進捗はstderrへ`[LEVEL] message`として出します。pull、push、adoptの最後には、
+status件数とreport pathをindent付きsummaryで表示します。`push`では、処理対象のsource ID、
 workbook path、include pattern、notes設定を最初に表示します。その後、`unchanged`以外の
 fileごとの結果を確定するたびに、noteのfile nameと相対`sourcePath`を表示し、最後に
 indent付きのsummaryを表示します。`unchanged`は個別表示せず、最終summaryに総数だけを表示します。stdoutには
-従来どおりcompact JSONを1件だけ出します。`--quiet`、`--verbose`、`--no-color`を提供し、
+従来どおりcompact JSONを1件だけ出します。`-v` / `--verbose`では、fieldごとのExcel値、
+Markdown値、base値、適用方向も表示します。`--quiet`、`--verbose`、`--no-color`を提供し、
 `NO_COLOR`も尊重します。
 
 `status`は、設定したsourceごとに件数をまとめ、未追跡workbook、未追跡代理ノート、

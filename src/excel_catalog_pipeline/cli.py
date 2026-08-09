@@ -79,7 +79,14 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 
 def _add_preference(parser: argparse.ArgumentParser) -> None:
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--prefer-source", action="store_true", help="Resolve conflicts from Excel.")
+    group.add_argument(
+        "--prefer-source",
+        action="store_true",
+        help=(
+            "Use Excel for conflicts and, during pull, overwrite differing "
+            "Markdown metadata with Excel values."
+        ),
+    )
     group.add_argument(
         "--prefer-note", action="store_true", help="Resolve conflicts from Markdown."
     )
@@ -233,7 +240,66 @@ def _log_push_action(logger: logging.Logger, action: Action) -> None:
 
 
 def _log_readable_summary(logger: logging.Logger, summary: dict[str, Any]) -> None:
-    logger.info("Summary:\n%s", json.dumps(summary, ensure_ascii=False, indent=2))
+    mode = "write" if summary.get("writeEnabled") else "dry-run"
+    lines = [
+        f"  command: {summary.get('command', '-')}",
+        f"  mode: {mode}",
+        f"  result: {summary.get('status', '-')}",
+        f"  changed files: {summary.get('changed', 0)}",
+        f"  conflicts: {summary.get('conflicts', 0)}",
+        f"  errors: {summary.get('errors', 0)}",
+        "  status counts:",
+    ]
+    counts = summary.get("statusCounts", {})
+    if isinstance(counts, dict) and counts:
+        lines.extend(f"    {status}: {count}" for status, count in counts.items())
+    else:
+        lines.append("    none")
+    lines.extend(
+        [
+            f"  report: {summary.get('reportPath', '-')}",
+            f"  differences CSV: {summary.get('differencesPath', '-')}",
+        ]
+    )
+    logger.info("Summary:\n%s", "\n".join(lines))
+
+
+def _display_difference_value(value: str) -> str:
+    if not value:
+        return "<empty>"
+    rendered = " ".join(value.split())
+    return rendered if len(rendered) <= 120 else rendered[:117] + "..."
+
+
+def _log_action_differences(logger: logging.Logger, actions: list[Action]) -> None:
+    lines: list[str] = []
+    direction_labels = {
+        "source-to-note": "Excel -> Markdown",
+        "note-to-source": "Markdown -> Excel",
+        "": "review only",
+    }
+    for action in actions:
+        if not action.field_differences:
+            continue
+        target = action.source_path or Path(action.note_path).name
+        lines.append(f"  [{action.status}] {target}")
+        for difference in action.field_differences:
+            planned = direction_labels.get(
+                difference.get("plannedDirection", ""),
+                difference.get("plannedDirection", "review only"),
+            )
+            lines.append(
+                "    {field} | Excel: {excel} | Markdown: {note} | "
+                "base: {base} | apply: {planned}".format(
+                    field=difference.get("field", "-"),
+                    excel=_display_difference_value(difference.get("excelValue", "")),
+                    note=_display_difference_value(difference.get("noteValue", "")),
+                    base=_display_difference_value(difference.get("baseValue", "")),
+                    planned=planned,
+                )
+            )
+    if lines:
+        logger.debug("Metadata differences:\n%s", "\n".join(lines))
 
 
 def _status_action_target(action: Action, source: SourceConfig) -> str:
@@ -376,6 +442,8 @@ def main(argv: list[str] | None = None) -> int:
             report_root=report_root,
             extra=extra,
         )
+        if args.verbose:
+            _log_action_differences(logger, actions)
         if args.command == "status":
             _log_status_results(logger, actions, sources)
         if summary["status"] == "success":
@@ -386,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.error(
                 "%s failed for one or more targets; report: %s", args.command, summary["reportPath"]
             )
-        if args.command == "push":
+        if args.command in {"pull", "push", "adopt"}:
             _log_readable_summary(logger, summary)
         _emit(summary)
         return _exit_code(summary)

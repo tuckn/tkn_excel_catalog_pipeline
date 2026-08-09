@@ -151,6 +151,35 @@ def test_partial_push_does_not_advance_base_for_source_only_change(
     assert [action.status for action in final_push] == ["unchanged"]
 
 
+def test_pull_prefer_source_restores_note_side_metadata_change(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    create_workbook(tmp_path / "workbooks" / "book.xlsx")
+    config = app_config(tmp_path)
+    state = tmp_path / "state.json"
+    monkeypatch.setattr(pipeline_module, "state_path", lambda: state)
+    run_pull(config, config.sources, write_notes=True, preference=None)
+
+    note_path = tmp_path / "notes" / "book.xlsx.md"
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8").replace("author: Example author", "author: ''"),
+        encoding="utf-8",
+    )
+
+    protected = run_pull(config, config.sources, write_notes=False, preference=None)
+    assert [action.status for action in protected] == ["push-required"]
+    assert protected[0].source_to_note_fields == []
+    assert protected[0].note_to_source_fields == ["author"]
+
+    planned = run_pull(config, config.sources, write_notes=False, preference="source")
+    assert [action.status for action in planned] == ["would-update"]
+    assert planned[0].changed_fields == ["author"]
+    assert planned[0].source_to_note_fields == ["author"]
+    assert planned[0].note_to_source_fields == []
+
+    applied = run_pull(config, config.sources, write_notes=True, preference="source")
+    assert [action.status for action in applied] == ["updated"]
+    assert read_note(note_path).frontmatter["author"] == "Example author"
+
+
 def test_push_preserves_repeated_title_whitespace(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     workbook_path = create_workbook(tmp_path / "workbooks" / "book.xlsx")
     config = app_config(tmp_path)

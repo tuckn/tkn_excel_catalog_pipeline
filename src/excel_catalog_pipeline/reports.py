@@ -34,6 +34,7 @@ def write_report(
         suffix += 1
     run_dir.mkdir(parents=True, exist_ok=False)
     rows = [action.as_dict() for action in actions]
+    differences_path = run_dir / "differences.csv"
     counts = dict(Counter(action.status for action in actions))
     conflicts = sum(bool(action.conflict_fields) for action in actions)
     errors = sum(action.status.endswith("error") for action in actions)
@@ -59,6 +60,7 @@ def write_report(
         "writeEnabled": write_enabled,
         "statusCounts": counts,
         "reportPath": str(run_dir),
+        "differencesPath": str(differences_path),
     }
     if extra:
         summary.update(extra)
@@ -71,6 +73,7 @@ def write_report(
     with (run_dir / "actions.csv").open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(
             handle,
+            extrasaction="ignore",
             fieldnames=[
                 "status",
                 "sourceRoot",
@@ -97,4 +100,24 @@ def write_report(
                     "details": json.dumps(row["details"], ensure_ascii=False, sort_keys=True),
                 }
             )
+    with differences_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        fieldnames = [
+            "status",
+            "sourceRoot",
+            "sourcePath",
+            "notePath",
+            "workbookId",
+            "field",
+            "direction",
+            "plannedDirection",
+            "baseValue",
+            "excelValue",
+            "noteValue",
+        ]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            identity = {key: row[key] for key in fieldnames[:5]}
+            for difference in row["fieldDifferences"]:
+                writer.writerow({**identity, **difference})
     return summary, run_dir
