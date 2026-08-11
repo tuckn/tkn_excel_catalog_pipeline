@@ -31,6 +31,7 @@ Direction = Literal[
     "converged",
     "conflict",
 ]
+FrontmatterTermFormat = Literal["obsidian-link", "plain"]
 
 
 def _canonical_terms(value: str) -> str:
@@ -50,6 +51,7 @@ class SourceConfig:
     recursive: bool = False
     ignore: tuple[str, ...] = ()
     profile: str = "tkn-obsidian-v1"
+    frontmatter_term_format: FrontmatterTermFormat = "obsidian-link"
     rename_adapter: str = "report-only"
 
 

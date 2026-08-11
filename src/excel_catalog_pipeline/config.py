@@ -7,11 +7,11 @@ from contextlib import suppress
 from copy import deepcopy
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
-from .models import AppConfig, SourceConfig, SyncConfig
+from .models import AppConfig, FrontmatterTermFormat, SourceConfig, SyncConfig
 from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
@@ -30,7 +30,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
 TOP_LEVEL_KEYS = {"schema_version", "sources", "sync"}
 SYNC_KEYS = set(DEFAULT_CONFIG["sync"])
 SOURCE_KEYS = {"id", "path", "recursive", "include", "ignore", "notes"}
-NOTES_KEYS = {"root", "profile", "rename_adapter"}
+NOTES_KEYS = {"root", "profile", "frontmatter_term_format", "rename_adapter"}
+FRONTMATTER_TERM_FORMATS = {"obsidian-link", "plain"}
 
 
 class ConfigError(ValueError):
@@ -202,6 +203,15 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
             load_note_template(profile)
         except NoteResourceError as exc:
             raise ConfigError(f"sources[{index}].notes.profile: {exc}") from exc
+        frontmatter_term_format = notes.get("frontmatter_term_format", "obsidian-link")
+        if (
+            not isinstance(frontmatter_term_format, str)
+            or frontmatter_term_format not in FRONTMATTER_TERM_FORMATS
+        ):
+            allowed = ", ".join(sorted(FRONTMATTER_TERM_FORMATS))
+            raise ConfigError(
+                f"sources[{index}].notes.frontmatter_term_format must be one of: {allowed}"
+            )
         sources.append(
             SourceConfig(
                 id=source_id,
@@ -211,6 +221,7 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
                 recursive=recursive,
                 ignore=tuple(ignore),
                 profile=profile,
+                frontmatter_term_format=cast(FrontmatterTermFormat, frontmatter_term_format),
                 rename_adapter=str(notes.get("rename_adapter", "report-only")),
             )
         )
@@ -244,6 +255,7 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
                 "notes": {
                     "root": str(source.note_root),
                     "profile": source.profile,
+                    "frontmatter_term_format": source.frontmatter_term_format,
                     "rename_adapter": source.rename_adapter,
                 },
             }

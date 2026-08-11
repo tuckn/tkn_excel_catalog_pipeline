@@ -204,6 +204,7 @@ def _log_source_configuration(logger: logging.Logger, sources: tuple[SourceConfi
                 "    notes:",
                 f"      root: {_yaml_single_quoted(str(source.note_root))}",
                 f"      profile: {source.profile}",
+                f"      frontmatter_term_format: {source.frontmatter_term_format}",
                 f"      rename_adapter: {source.rename_adapter}",
             ]
         )

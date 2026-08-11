@@ -141,6 +141,13 @@ def metadata_to_links(value: str) -> list[str]:
     return [f"[[{term}]]" for term in _split_terms(value)]
 
 
+def metadata_to_frontmatter_terms(value: str, term_format: str) -> list[str]:
+    terms = _split_terms(value)
+    if term_format == "plain":
+        return terms
+    return [f"[[{term}]]" for term in terms]
+
+
 def _frontmatter_terms(value: Any) -> str:
     terms: list[str] = []
     for item in _frontmatter_list(value):
@@ -329,8 +336,12 @@ def render_note(
                 "description": description,
                 "subject": values["subject"],
                 "author": values["author"],
-                "keywords": metadata_to_links(values["keywords"]),
-                "categories": metadata_to_links(values["categories"]),
+                "keywords": metadata_to_frontmatter_terms(
+                    values["keywords"], source.frontmatter_term_format
+                ),
+                "categories": metadata_to_frontmatter_terms(
+                    values["categories"], source.frontmatter_term_format
+                ),
                 "comments": values["comments"],
                 "files": existing_frontmatter.get("files", []),
                 "source_root": source.id,

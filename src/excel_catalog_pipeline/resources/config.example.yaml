@@ -11,6 +11,7 @@ sources:
     notes:
       root: 'C:\path\to\obsidian-vault\reference\entities\files\Excel'
       profile: tkn-obsidian-v1
+      frontmatter_term_format: obsidian-link
       rename_adapter: report-only
 
 sync:

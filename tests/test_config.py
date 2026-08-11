@@ -73,9 +73,53 @@ def test_source_traversal_defaults_are_non_recursive(tmp_path: Path) -> None:
     assert source.recursive is False
     assert source.include == ("*.xlsx", "*.xlsm")
     assert source.ignore == ()
+    assert source.frontmatter_term_format == "obsidian-link"
     rendered = config_as_dict(loaded)["sources"][0]
     assert rendered["recursive"] is False
     assert rendered["ignore"] == []
+    assert rendered["notes"]["frontmatter_term_format"] == "obsidian-link"
+
+
+def test_frontmatter_term_format_can_be_plain(tmp_path: Path) -> None:
+    loaded = config_module.validate_config(
+        {
+            "schema_version": 1,
+            "sync": dict(config_module.DEFAULT_CONFIG["sync"]),
+            "sources": [
+                {
+                    "id": "example",
+                    "path": str(tmp_path / "source"),
+                    "notes": {
+                        "root": str(tmp_path / "notes"),
+                        "frontmatter_term_format": "plain",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert loaded.sources[0].frontmatter_term_format == "plain"
+
+
+@pytest.mark.parametrize("value", ["wiki", ["plain"]])
+def test_invalid_frontmatter_term_format_is_rejected(tmp_path: Path, value: object) -> None:
+    with pytest.raises(ConfigError, match="frontmatter_term_format must be one of"):
+        config_module.validate_config(
+            {
+                "schema_version": 1,
+                "sync": dict(config_module.DEFAULT_CONFIG["sync"]),
+                "sources": [
+                    {
+                        "id": "example",
+                        "path": str(tmp_path / "source"),
+                        "notes": {
+                            "root": str(tmp_path / "notes"),
+                            "frontmatter_term_format": value,
+                        },
+                    }
+                ],
+            }
+        )
 
 
 @pytest.mark.parametrize(

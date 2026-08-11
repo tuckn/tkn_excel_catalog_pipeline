@@ -69,8 +69,9 @@ excel-catalog config init
 | `sources[].include` | 探索する階層で対象にするworkbookのglob patternです。 |
 | `sources[].ignore` | source root基準で対象外にするfileまたはfolderのglob patternです。 |
 | `sources[].notes.root` | 代理noteのfolderです。`pull`の出力先であり、`push`の入力元です。 |
-| `sources[].profile` | note形式のprofileです。現versionでは`tkn-obsidian-v1`のまま使用します。 |
-| `sources[].rename_adapter` | rename・folder移動の処理方法です。既定の`report-only`はfileを変更せず、`filesystem`は後述の明示的なwrite optionと組み合わせて直接変更します。 |
+| `sources[].notes.profile` | note形式のprofileです。現versionでは`tkn-obsidian-v1`のまま使用します。 |
+| `sources[].notes.frontmatter_term_format` | `keywords`と`categories`の形式です。既定の`obsidian-link`は`[[term]]`、`plain`は通常文字列で出力します。 |
+| `sources[].notes.rename_adapter` | rename・folder移動の処理方法です。既定の`report-only`はfileを変更せず、`filesystem`は後述の明示的なwrite optionと組み合わせて直接変更します。 |
 | `sync.max_extracted_text_chars` | 代理noteへ保存するworkbook抽出textの最大文字数です。 |
 
 その他の`sync`の真偽値は、将来の拡張に備えた安全方針です。現versionは未知のnote
@@ -114,6 +115,7 @@ sources:
     notes:
       root: 'C:\path\to\obsidian-vault\reference\entities\files\Excel'
       profile: tkn-obsidian-v1
+      frontmatter_term_format: obsidian-link
       rename_adapter: filesystem
 ```
 
@@ -236,7 +238,9 @@ excel-catalog adopt --write-excel
 | `sourceFileName` | source root基準の相対workbook path。編集時は明示rename/move要求 |
 
 `description`は代理ノート専用の任意説明で、Excelへpushしません。Frontmatterのlist値は
-quote付きObsidian linkとして保持し、Excelへはlink記法を外して`; `で結合します。
+既定ではquote付きObsidian linkとして保持します。通常文字列にする場合は
+`sources[].notes.frontmatter_term_format: plain`を設定します。どちらの形式もExcelへは
+link記法を含まないtermとして`; `で結合します。
 commaはtermの一部として保持します。`sourceCreated`と`sourceModified`は`pull`でのみ
 更新し、`push`では現在のnote値を無視・保持します。
 生成する`type`、source日時、`date`、`updated`、`noteId`の値はquoteなしのplain YAML

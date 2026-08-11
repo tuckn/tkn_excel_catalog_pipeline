@@ -214,6 +214,7 @@ sources:
     assert "    ignore: []" in captured.err
     assert f"      root: '{notes.resolve()}'" in captured.err
     assert "      profile: tkn-obsidian-v1" in captured.err
+    assert "      frontmatter_term_format: obsidian-link" in captured.err
     assert "      rename_adapter: report-only" in captured.err
     assert "[SUCCESS] [written] fileName=one.xlsx | sourcePath=one.xlsx | message=-" in captured.err
     assert (

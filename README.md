@@ -71,8 +71,9 @@ The main settings are:
 | `sources[].include` | Glob patterns selecting workbooks at the scanned levels. |
 | `sources[].ignore` | Source-root-relative glob patterns excluding files or folders. |
 | `sources[].notes.root` | Proxy-note folder: `pull` writes here and `push` reads from here. |
-| `sources[].profile` | Note-format profile; keep `tkn-obsidian-v1` in the current version. |
-| `sources[].rename_adapter` | Controls rename and folder-move handling. The default `report-only` changes no files; `filesystem` performs direct changes only with the explicit write options described below. |
+| `sources[].notes.profile` | Note-format profile; keep `tkn-obsidian-v1` in the current version. |
+| `sources[].notes.frontmatter_term_format` | Format for `keywords` and `categories`: `obsidian-link` (default) writes `[[term]]`; `plain` writes ordinary strings. |
+| `sources[].notes.rename_adapter` | Controls rename and folder-move handling. The default `report-only` changes no files; `filesystem` performs direct changes only with the explicit write options described below. |
 | `sync.max_extracted_text_chars` | Maximum extracted workbook text stored in a proxy note. |
 
 The remaining `sync` booleans document safety policy for future extension. The
@@ -118,6 +119,7 @@ sources:
     notes:
       root: 'C:\path\to\obsidian-vault\reference\entities\files\Excel'
       profile: tkn-obsidian-v1
+      frontmatter_term_format: obsidian-link
       rename_adapter: filesystem
 ```
 
@@ -240,9 +242,10 @@ excel-catalog adopt --write-excel
 | `sourceModified`  | Modified; source-owned and pull-only  |
 | `sourceFileName`  | Source-root-relative workbook path; editing it requests an explicit rename or move |
 
-`description` is an optional proxy-note description and is never pushed to Excel. List
-values use quoted Obsidian links in Frontmatter and are serialized to Excel as plain terms
-joined by `; `. Commas remain part of a term. `sourceCreated` and `sourceModified` are
+`description` is an optional proxy-note description and is never pushed to Excel. By
+default, list values use quoted Obsidian links in Frontmatter. Set
+`sources[].notes.frontmatter_term_format: plain` to write ordinary strings instead. Both
+formats are serialized to Excel as plain terms joined by `; `. Commas remain part of a term. `sourceCreated` and `sourceModified` are
 refreshed only by `pull`; `push` ignores and preserves their current note values.
 Generated `type`, source timestamps, `date`, `updated`, and `noteId` values use plain,
 unquoted YAML scalars. `schemaVersion` remains a quoted string.

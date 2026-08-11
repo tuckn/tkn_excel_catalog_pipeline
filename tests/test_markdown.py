@@ -162,6 +162,28 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
     )
 
 
+def test_render_can_use_plain_keyword_and_category_values(tmp_path: Path) -> None:
+    workbook_path = create_workbook(tmp_path / "book.xlsx")
+    source = SourceConfig(
+        id="example",
+        path=tmp_path,
+        include=("**/*.xlsx",),
+        note_root=tmp_path / "notes",
+        frontmatter_term_format="plain",
+    )
+    workbook = inspect_workbook(workbook_path, source, max_text_chars=1000)
+
+    note_path = tmp_path / "rendered.md"
+    note_path.write_text(render_note(workbook, source), encoding="utf-8")
+    note = read_note(note_path)
+
+    assert note.frontmatter["keywords"] == ["Excel", "Catalog"]
+    assert note.frontmatter["categories"] == ["Engineer, Myself"]
+    assert "[[" not in note_path.read_text(encoding="utf-8")
+    assert note_metadata(note)["keywords"] == "Excel; Catalog"
+    assert note_metadata(note)["categories"] == "Engineer, Myself"
+
+
 def test_unknown_note_profile_is_rejected_when_rendering(tmp_path: Path) -> None:
     workbook_path = create_workbook(tmp_path / "book.xlsx")
     source = SourceConfig(
