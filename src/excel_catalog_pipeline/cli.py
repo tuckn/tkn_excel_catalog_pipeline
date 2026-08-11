@@ -94,7 +94,7 @@ def _add_preference(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="excel-catalog",
+        prog="tkn-excel-catalog",
         description="Synchronize Excel workbook metadata with Markdown proxy notes.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

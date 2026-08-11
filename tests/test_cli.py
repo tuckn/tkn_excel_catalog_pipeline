@@ -12,6 +12,10 @@ from excel_catalog_pipeline.models import Action
 from .helpers import create_workbook
 
 
+def test_cli_uses_tkn_prefixed_program_name() -> None:
+    assert cli_module.build_parser().prog == "tkn-excel-catalog"
+
+
 def test_config_show_outputs_one_json_document(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     config = tmp_path / "config.yaml"
     config.write_text("schema_version: 1\nsources: []\n", encoding="utf-8")

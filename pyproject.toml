@@ -13,7 +13,7 @@ authors = [{ name = "Tuckn" }]
 dependencies = ["PyYAML>=6.0.2"]
 
 [project.scripts]
-excel-catalog = "excel_catalog_pipeline.cli:main"
+tkn-excel-catalog = "excel_catalog_pipeline.cli:main"
 
 [dependency-groups]
 dev = [

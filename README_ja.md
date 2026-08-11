@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-`excel-catalog`は、`.xlsx` / `.xlsm` workbookをMarkdown代理ノートへ投影し、
+`tkn-excel-catalog`は、`.xlsx` / `.xlsm` workbookをMarkdown代理ノートへ投影し、
 選択したmetadataを双方向に安全に同期するCLIです。Excelはsource workbookのまま、
 Markdownを検索用catalog entry兼metadata編集面として使います。
 
@@ -25,21 +25,24 @@ metadataの検査にはExcel、Excel COM、Obsidianは不要です。Obsidianが
 ```console
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv tool install .
-excel-catalog --help
+tkn-excel-catalog --help
 ```
 
 このinstallationでは、install時点のcode、package resource、dependencyが`uv`の
 tool環境へ格納され、repository内の変更は自動反映されません。最後のcommandは、
 install後にCLI entry pointが動作することを確認します。現在の設定は
-`excel-catalog config show`、versionは`excel-catalog --version`で確認できます。
+`tkn-excel-catalog config show`、versionは`tkn-excel-catalog --version`で確認できます。
 
 `git pull`などでrepositoryを更新した後は、次のcommandで再インストールします。
 
 ```console
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv tool install . --reinstall
-excel-catalog --help
+tkn-excel-catalog --help
 ```
+
+実行名は`excel-catalog`から`tkn-excel-catalog`へ変更されました。旧versionをinstall済みの
+場合は、上記の`--reinstall`付きcommandでinstall済みentry pointを更新できます。
 
 `--reinstall`により、更新後のcode、package resource、dependencyをtool環境へ確実に
 反映します。`--force`はtool installation自体を強制しますが、同じversionのpackageを
@@ -50,12 +53,12 @@ excel-catalog --help
 まずuser共通の設定fileを生成し、例示pathを書き換えます。
 
 ```console
-excel-catalog config init
+tkn-excel-catalog config init
 ```
 
 `~/.tkn/excel_catalog_pipeline/config.yaml`が作成されます。同じ内容のfileがある場合は
 変更しないため、再実行しても安全です。編集済みのfileは上書きせずに停止します。
-`excel-catalog config init --force`を指定するとtemplateで置き換えるため、既存の編集を
+`tkn-excel-catalog config init --force`を指定するとtemplateで置き換えるため、既存の編集を
 破棄するときだけ使用してください。
 
 主な設定項目は次のとおりです。
@@ -92,8 +95,8 @@ Windows pathはYAMLのsingle quoteで囲む方法を推奨します。例:
 directory基準です。実行fileを作らず解決結果を確認できます。
 
 ```console
-excel-catalog config show
-excel-catalog --config C:\path\to\config.yaml config show
+tkn-excel-catalog config show
+tkn-excel-catalog --config C:\path\to\config.yaml config show
 ```
 
 source IDは一意である必要があります。schemaは複数rootを表現でき、`--source <id>`で
@@ -154,14 +157,14 @@ optionなしの`pull`と`push`はdry-runです。`sync.allow_source_rename`は�
 読み取りエラーを確認:
 
 ```console
-excel-catalog status
+tkn-excel-catalog status
 ```
 
 ExcelからMarkdownへの変更を確認し、review後に適用:
 
 ```console
-excel-catalog pull
-excel-catalog pull --write-notes
+tkn-excel-catalog pull
+tkn-excel-catalog pull --write-notes
 ```
 
 通常の`pull`は、Markdownだけで編集されたように見えるmetadataを上書きせず保持します。
@@ -169,22 +172,22 @@ excel-catalog pull --write-notes
 dry-run reportを確認してから`--prefer-source`を明示します。
 
 ```console
-excel-catalog pull --source example --prefer-source
-excel-catalog pull --source example --prefer-source --write-notes
+tkn-excel-catalog pull --source example --prefer-source
+tkn-excel-catalog pull --source example --prefer-source --write-notes
 ```
 
 subcommandの前にglobal option `-v`を付けると、metadataの比較値をfield単位で表示します。
 同じ完全な値は、workbookの1 fieldを1行とする`differences.csv`にも保存します。
 
 ```console
-excel-catalog -v pull --source example --prefer-source
+tkn-excel-catalog -v pull --source example --prefer-source
 ```
 
 MarkdownからExcelへの変更を確認し、review後にbackup付きで適用:
 
 ```console
-excel-catalog push
-excel-catalog push --write-excel
+tkn-excel-catalog push
+tkn-excel-catalog push --write-excel
 ```
 
 `push`のfile別status:
@@ -211,15 +214,15 @@ file nameだけを表示します。
 特定ノートだけを対象にする例:
 
 ```console
-excel-catalog push --note example.xlsx.md
-excel-catalog push --note example.xlsx.md --write-excel
+tkn-excel-catalog push --note example.xlsx.md
+tkn-excel-catalog push --note example.xlsx.md --write-excel
 ```
 
 stable workbook IDの不足を確認し、明示的にcustom propertyへ付与:
 
 ```console
-excel-catalog adopt
-excel-catalog adopt --write-excel
+tkn-excel-catalog adopt
+tkn-excel-catalog adopt --write-excel
 ```
 
 ## metadata契約

@@ -2,7 +2,7 @@
 
 [日本語](README_ja.md)
 
-`excel-catalog` projects `.xlsx` and `.xlsm` workbooks into Markdown proxy notes and
+`tkn-excel-catalog` projects `.xlsx` and `.xlsm` workbooks into Markdown proxy notes and
 safely synchronizes selected metadata in both directions. Excel remains the source
 workbook; Markdown is a searchable catalog entry and metadata editing surface.
 
@@ -26,22 +26,25 @@ For normal use, install the tool with the following command. Replace
 ```console
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv tool install .
-excel-catalog --help
+tkn-excel-catalog --help
 ```
 
 This installs the current code, package resources, and dependencies into the
 `uv`-managed tool environment. Later repository changes are not reflected
 automatically. The final command verifies the CLI entry point. Use
-`excel-catalog config show` to inspect the effective configuration and
-`excel-catalog --version` to check the version.
+`tkn-excel-catalog config show` to inspect the effective configuration and
+`tkn-excel-catalog --version` to check the version.
 
 After `git pull` or another repository update, reinstall the tool:
 
 ```console
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv tool install . --reinstall
-excel-catalog --help
+tkn-excel-catalog --help
 ```
+
+The executable was renamed from `excel-catalog` to `tkn-excel-catalog`. If an older
+installation is present, the `--reinstall` command above updates the installed entry point.
 
 `--reinstall` ensures that the updated code, package resources, and dependencies are
 installed into the tool environment. `--force` forces the tool installation itself,
@@ -52,12 +55,12 @@ but does not guarantee that a package with the same version is rebuilt and reins
 Create the user-wide configuration, then edit its example paths:
 
 ```console
-excel-catalog config init
+tkn-excel-catalog config init
 ```
 
 This creates `~/.tkn/excel_catalog_pipeline/config.yaml`. Re-running the command is
 safe: an identical file is left unchanged, and an edited file is not overwritten.
-`excel-catalog config init --force` explicitly replaces an existing edited file with
+`tkn-excel-catalog config init --force` explicitly replaces an existing edited file with
 the template, so use it only when discarding those edits is intentional.
 
 The main settings are:
@@ -96,8 +99,8 @@ Relative paths are resolved from the current working directory. Inspect the effe
 configuration without creating runtime files:
 
 ```console
-excel-catalog config show
-excel-catalog --config C:\path\to\config.yaml config show
+tkn-excel-catalog config show
+tkn-excel-catalog --config C:\path\to\config.yaml config show
 ```
 
 Source IDs must be unique. The schema supports multiple roots; use `--source <id>` to
@@ -157,14 +160,14 @@ The affected file, current source and note paths, and reason for a `rename-requi
 Inventory configured workbooks and proxy notes:
 
 ```console
-excel-catalog status
+tkn-excel-catalog status
 ```
 
 Plan Excel-to-Markdown changes, then apply reviewed note writes:
 
 ```console
-excel-catalog pull
-excel-catalog pull --write-notes
+tkn-excel-catalog pull
+tkn-excel-catalog pull --write-notes
 ```
 
 Normal `pull` preserves metadata that appears to have been edited only in Markdown.
@@ -173,22 +176,22 @@ authoritative for every differing metadata field, including recovery from incorr
 historical synchronization state:
 
 ```console
-excel-catalog pull --source example --prefer-source
-excel-catalog pull --source example --prefer-source --write-notes
+tkn-excel-catalog pull --source example --prefer-source
+tkn-excel-catalog pull --source example --prefer-source --write-notes
 ```
 
 Add global `-v` before the subcommand to print each metadata comparison. The same full
 values are written to `differences.csv`, one row per workbook field:
 
 ```console
-excel-catalog -v pull --source example --prefer-source
+tkn-excel-catalog -v pull --source example --prefer-source
 ```
 
 Plan Markdown-to-Excel metadata changes, then apply reviewed workbook writes:
 
 ```console
-excel-catalog push
-excel-catalog push --write-excel
+tkn-excel-catalog push
+tkn-excel-catalog push --write-excel
 ```
 
 Per-file `push` statuses:
@@ -215,16 +218,16 @@ shows only the proxy-note filename.
 Limit a push to one proxy note:
 
 ```console
-excel-catalog push --note example.xlsx.md
-excel-catalog push --note example.xlsx.md --write-excel
+tkn-excel-catalog push --note example.xlsx.md
+tkn-excel-catalog push --note example.xlsx.md --write-excel
 ```
 
 Assign missing stable workbook IDs. This changes the OOXML custom properties only in
 write mode and creates a backup first:
 
 ```console
-excel-catalog adopt
-excel-catalog adopt --write-excel
+tkn-excel-catalog adopt
+tkn-excel-catalog adopt --write-excel
 ```
 
 ## Metadata contract
