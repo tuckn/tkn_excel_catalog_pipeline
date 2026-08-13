@@ -5,9 +5,10 @@
 `tkn-excel-catalog`は、`.xlsx` / `.xlsm` workbookをMarkdown代理ノートへ投影し、
 選択したmetadataを双方向に安全に同期するCLIです。Excelはsource workbookのまま、
 Markdownを検索用catalog entry兼metadata編集面として使います。
-
-変更を伴う処理はすべて、既定ではreportだけを作るdry-runです。workbookや代理ノートを
-自動削除しません。
+ExcelからMarkdownへの反映は`pull`、MarkdownからExcelへの反映は`push`です。
+前回両者が一致した同期stateを基準に変更方向とconflictを判定します。
+変更を伴う処理はすべて、既定ではreportだけを作るdry-runであり、
+workbookや代理ノートを自動削除しません。
 
 ## 必要環境
 
@@ -17,6 +18,8 @@ Markdownを検索用catalog entry兼metadata編集面として使います。
 
 metadataの検査にはExcel、Excel COM、Obsidianは不要です。Obsidianが関係するのは、
 代理ノートrename時にbacklink更新が必要な場合だけです。
+旧`.xls` workbookは主CLIの対象外です。desktop版Excelを使う変換方法は
+「仕様」の「旧`.xls` workbookの変換」を参照してください。
 
 ## インストール
 
@@ -50,6 +53,8 @@ tkn-excel-catalog --help
 
 ## 設定
 
+### 設定fileを作成する
+
 まずuser共通の設定fileを生成し、例示pathを書き換えます。
 
 ```console
@@ -60,6 +65,11 @@ tkn-excel-catalog config init
 変更しないため、再実行しても安全です。編集済みのfileは上書きせずに停止します。
 `tkn-excel-catalog config init --force`を指定するとtemplateで置き換えるため、既存の編集を
 破棄するときだけ使用してください。
+
+最初には`sources[].id`、`sources[].path`、`sources[].notes.root`を実際の値に
+書き換えれば、基本操作を始められます。
+
+### 主な設定項目
 
 主な設定項目は次のとおりです。
 
@@ -85,6 +95,8 @@ Windows pathはYAMLのsingle quoteで囲む方法を推奨します。例:
 `'C:\path\to\excel-workbooks'`。single quote内ではbackslashを`\\`へ二重化する必要は
 ありません。
 
+### 設定内容を確認する
+
 設定は次の順で読み込まれます。
 
 1. `~/.tkn/excel_catalog_pipeline/config.yaml`
@@ -98,6 +110,8 @@ directory基準です。実行fileを作らず解決結果を確認できます�
 tkn-excel-catalog config show
 tkn-excel-catalog --config C:\path\to\config.yaml config show
 ```
+
+### サブfolderを読む設定例
 
 source IDは一意である必要があります。schemaは複数rootを表現でき、`--source <id>`で
 1つに限定できます。
@@ -124,34 +138,16 @@ sources:
 
 `recursive: true`では、source rootからの相対folderを代理note側にも再現します。例えば`2008/所有してきたCPUのベンチマーク比較.xlsx`は、notes rootの`2008/所有してきたCPUのベンチマーク比較.xlsx.md`となり、Frontmatterは`sourceFileName: 2008/所有してきたCPUのベンチマーク比較.xlsx`になります。既存workbookを年folderへ移動した後は、まず`pull`で予定を確認し、review後に`pull --write-notes`を実行してください。追跡済み代理noteのfolder移動を直接適用するには`rename_adapter: filesystem`が必要です。
 
-### rename・folder移動の設定
-
-rename・folder移動は、変更した場所によって次の2方向があります。
-
-| 変更した場所 | CLIが検出する要求 | 許可時にCLIが変更する対象 |
-| --- | --- | --- |
-| Explorerなどでworkbookをrename・移動した後に`pull` | sourceの相対pathに合わせた代理noteのrename・移動 | 代理note |
-| 代理noteのFrontmatter `sourceFileName`を編集した後に`push` | source root内でのworkbookのrename・移動 | workbookと代理note |
-
-`rename_adapter`は、この要求をfilesystem上で直接処理してよいかをsource単位で指定します。
-
-- `report-only`: 既定値です。rename・folder移動が必要でもfileを変更せず、actionを`rename-required`としてrun reportへ記録します。
-- `filesystem`: backlink更新を伴わない通常のfilesystem操作で、workbookまたは代理noteを直接rename・移動できるようにします。
-
-`filesystem`を設定しただけではfileは変更されません。実際の変更には、方向に応じて次のwrite optionも必要です。
-
-| 方向 | 必要な設定とcommand |
-| --- | --- |
-| workbookを先にrename・移動し、代理noteを追従させる | `rename_adapter: filesystem`と`pull --write-notes` |
-| `sourceFileName`を編集し、workbookと代理noteをrename・移動する | `rename_adapter: filesystem`と`push --write-excel --allow-rename` |
-
-optionなしの`pull`と`push`はdry-runです。`sync.allow_source_rename`は現versionのrename許可判定には使用されないため、上記の`rename_adapter`とcommand optionを使用してください。
-
-`rename-required`の対象、現在のsource path・note path、理由は`~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv`と`details.json`へ記録されます。`pull`で代理noteの移動が必要な場合は、希望するnote pathと衝突情報も`details.json`に入ります。`push`側の希望する相対pathは編集したFrontmatter `sourceFileName`で確認します。command終了時にreport folderがconsoleへ表示され、`push`ではfile単位の`rename-required`もstderrへ表示されます。
-
-`filesystem`はMarkdown fileを直接移動し、Obsidian backlinkを更新しません。そのため既定値は`report-only`です。backlink更新が必要なVaultではreportを確認し、Obsidian上で手動renameするか、対応する外部adapterが追加されるまで`report-only`を使用してください。
+rename・folder移動の方向、許可option、Obsidian backlinkの注意点は、
+「仕様」の「rename・folder移動」を参照してください。
 
 ## 基本操作
+
+変更を伴うcommandは、まずwrite optionなしのdry-runで実行します。
+consoleのsummaryとreport folderをreviewし、意図した内容であることを確認してから、
+同じcommandに明示的なwrite optionを付けて適用します。
+
+### 状態を確認する
 
 設定したsource内のExcel workbookと代理ノートを走査し、追跡状況、重複ID、
 読み取りエラーを確認:
@@ -159,6 +155,8 @@ optionなしの`pull`と`push`はdry-runです。`sync.allow_source_rename`は�
 ```console
 tkn-excel-catalog status
 ```
+
+### ExcelからMarkdownへ反映する
 
 ExcelからMarkdownへの変更を確認し、review後に適用:
 
@@ -183,6 +181,8 @@ subcommandの前にglobal option `-v`を付けると、metadataの比較値をfi
 tkn-excel-catalog -v pull --source example --prefer-source
 ```
 
+### MarkdownからExcelへ反映する
+
 MarkdownからExcelへの変更を確認し、review後にbackup付きで適用:
 
 ```console
@@ -190,26 +190,10 @@ tkn-excel-catalog push
 tkn-excel-catalog push --write-excel
 ```
 
-`push`のfile別status:
+各statusの意味と終了codeは、「仕様」の「console出力、status、終了code」を
+参照してください。
 
-| status | 意味 |
-| ------ | ---- |
-| `unchanged` | workbookと代理ノートに同期対象の差分がありません。個別ログには表示せず、summaryに総数だけを表示します。 |
-| `would-write` | 代理ノート側の変更をworkbookへ書き込む予定です。dry-runのため、まだ書き込んでいません。 |
-| `written` | workbookへの書き込みと検証が完了しました。 |
-| `missing-source` | 代理ノートに一意に対応するworkbookが見つかりません。workbookは変更しません。 |
-| `pull-required` | workbook側に取り込むべき変更があります。`push`では変更せず、`pull`で確認します。 |
-| `conflict` | base、workbook、代理ノートの比較で競合しました。内容を確認し、必要な場合だけ`--prefer-note`または`--prefer-source`を指定します。 |
-| `duplicate-id` | 同じ`TknExcelCatalogId`を持つworkbookが複数あり、一意に対応付けできません。 |
-| `rename-required` | rename要求がありますが、明示許可または設定されたadapterでの処理が必要です。 |
-| `rename-error` | rename先の名前、衝突、または関連fileの処理で問題が発生しました。 |
-| `read-error` | workbookまたは代理ノートの検出・読み取りに失敗しました。 |
-| `write-error` | workbookへの書き込みまたは書き込み後の検証に失敗しました。可能な範囲でrollbackします。 |
-
-`sourcePath`は、開始時に表示される選択sourceの`path`を基準にした相対パスです。
-root pathを各行で繰り返さず、reportをsourceの移動に対して扱いやすくするためです。
-`missing-source`は対応するworkbook自体がないため`sourcePath`を持たず、ログには代理ノートの
-file nameだけを表示します。
+### 対象を限定する
 
 特定ノートだけを対象にする例:
 
@@ -218,6 +202,8 @@ tkn-excel-catalog push --note example.xlsx.md
 tkn-excel-catalog push --note example.xlsx.md --write-excel
 ```
 
+### workbook IDを付与する
+
 stable workbook IDの不足を確認し、明示的にcustom propertyへ付与:
 
 ```console
@@ -225,7 +211,34 @@ tkn-excel-catalog adopt
 tkn-excel-catalog adopt --write-excel
 ```
 
-## metadata契約
+## 仕様
+
+### 同期modelと管理state
+
+このCLIはExcelとMarkdownの二者だけを比較するのではなく、次の3つを
+workbookごと、metadata fieldごとに比較します。
+
+```text
+現在のExcel workbook metadata -------\
+前回一致した値 (sync-state.json) ---+-> CLIの三方向比較 -> pull / push / conflict
+現在のMarkdown代理ノート ---------/
+```
+
+| 構成要素 | 役割 |
+| --- | --- |
+| Excel workbook | 実データである`.xlsx` / `.xlsm`と、現在のOOXML metadataを保持します。 |
+| Markdown代理ノート | workbookの検索用catalog entryであり、`push`でExcelへ戻すmetadataの編集面です。 |
+| `~/.tkn/excel_catalog_pipeline/state/sync-state.json` | CLIが管理する同期stateです。workbook ID、source / note path、前回両者が一致した`baseMetadata`などを保持します。userがmetadataを編集するfileではありません。 |
+
+例えば、前回一致したtitleだけをExcel側で変更した場合は`pull`、
+Markdown側だけで変更した場合は`push`の対象です。両方が前回値から
+別々の値へ変わった場合は`conflict`とし、勝手に上書きしません。
+明示的なwrite後は、ExcelとMarkdownが実際に一致したfieldだけを新しい
+baseとして`sync-state.json`へ記録します。dry-runはこのstateを更新しません。
+runごとの`summary.json`や`differences.csv`は判定のreview用reportであり、
+上記の継続的な同期stateとは別です。
+
+### metadata契約
 
 | Markdown代理ノート | Excel core property            |
 | ------------------ | ------------------------------ |
@@ -263,7 +276,7 @@ noteを変更しません。
 このfileはpackage resourceとして配布し、user設定にはしません。Pythonはresourceの読込と
 validation、動的なworkbook内容の生成、安全なmarker置換を担当します。
 
-## conflictとrename
+### conflictの判定と解決
 
 前回一致時のbase、現在のworkbook、現在のnoteをfield単位で三方向比較します。双方が
 異なる値へ変わった場合は終了code `2`で停止し、mtimeによるlast-write-winsは行いません。
@@ -274,9 +287,35 @@ review後に`--prefer-source`または`--prefer-note`を明示できます。
 部分的な`pull`または`push`の後は、workbookと代理noteが実際に一致したfieldだけbaseを
 更新します。反対方向に残る未同期変更は同期済みにせず、次のcommandへ引き継ぎます。
 
-rename・folder移動の検出方向、必要なoption、report先は「設定」の「rename・folder移動の設定」を参照してください。rename先はsource root内に収まり、現在と同じ拡張子で、Windows上有効かつ衝突しない相対pathである必要があります。
+### rename・folder移動
 
-## 出力と安全性
+rename・folder移動は、変更した場所によって次の2方向があります。
+
+| 変更した場所 | CLIが検出する要求 | 許可時にCLIが変更する対象 |
+| --- | --- | --- |
+| Explorerなどでworkbookをrename・移動した後に`pull` | sourceの相対pathに合わせた代理noteのrename・移動 | 代理note |
+| 代理noteのFrontmatter `sourceFileName`を編集した後に`push` | source root内でのworkbookのrename・移動 | workbookと代理note |
+
+`rename_adapter`は、この要求をfilesystem上で直接処理してよいかをsource単位で指定します。
+
+- `report-only`: 既定値です。rename・folder移動が必要でもfileを変更せず、actionを`rename-required`としてrun reportへ記録します。
+- `filesystem`: backlink更新を伴わない通常のfilesystem操作で、workbookまたは代理noteを直接rename・移動できるようにします。
+
+`filesystem`を設定しただけではfileは変更されません。実際の変更には、方向に応じて次のwrite optionも必要です。
+
+| 方向 | 必要な設定とcommand |
+| --- | --- |
+| workbookを先にrename・移動し、代理noteを追従させる | `rename_adapter: filesystem`と`pull --write-notes` |
+| `sourceFileName`を編集し、workbookと代理noteをrename・移動する | `rename_adapter: filesystem`と`push --write-excel --allow-rename` |
+
+optionなしの`pull`と`push`はdry-runです。`sync.allow_source_rename`は現versionのrename許可判定には使用されないため、上記の`rename_adapter`とcommand optionを使用してください。
+
+`rename-required`の対象、現在のsource path・note path、理由は`~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv`と`details.json`へ記録されます。`pull`で代理noteの移動が必要な場合は、希望するnote pathと衝突情報も`details.json`に入ります。`push`側の希望する相対pathは編集したFrontmatter `sourceFileName`で確認します。command終了時にreport folderがconsoleへ表示され、`push`ではfile単位の`rename-required`もstderrへ表示されます。
+
+rename先はsource root内に収まり、現在と同じ拡張子で、Windows上有効かつ衝突しない相対pathである必要があります。
+`filesystem`はMarkdown fileを直接移動し、Obsidian backlinkを更新しません。そのため既定値は`report-only`です。backlink更新が必要なVaultではreportを確認し、Obsidian上で手動renameするか、対応する外部adapterが追加されるまで`report-only`を使用してください。
+
+### run reportと同期state
 
 run report:
 
@@ -297,7 +336,9 @@ file別reportでは、`sourceToNoteFields`が`pull`でworkbookから代理note�
 `direction`、明示操作による`plannedDirection`を記録します。JSONを読まなくても、
 空欄による削除やExcelを正とした復旧内容を確認できます。
 
-workbook writeは次の契約です。
+### workbook writeの安全性
+
+書き込みは次の契約です。
 
 - `.xlsx` / `.xlsm`だけを正式対応する。
 - workbookの上書き前にbackupする。
@@ -313,14 +354,39 @@ workbook writeは次の契約です。
 暗号化workbook、`.xls`、`.xlsb`、削除同期、format変換、図形や二次元layoutの意味解析は
 MVP対象外です。cell text抽出は検索補助であり、内容の完全表現ではありません。
 
-## consoleと終了code
+### 旧`.xls` workbookの変換
+
+Windows用の補佐scriptはdesktop版Excelを使い、旧`.xls` workbookをcatalogへ取り込む前に
+変換します。元fileは残し、既存の変換先を上書きしません。VBAを含むworkbookは`.xlsm`、
+それ以外は`.xlsx`として保存します。desktop版Excelが必要なのは、この変換scriptだけです。
+
+まずdry-runで予定を確認し、次に明示的なwrite switchを付けて実行します。
+
+```console
+.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks"
+.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks" -Write
+```
+
+`-SourcePath`は、変換元の`.xls`があるfolderを指定する引数であり、出力先の指定では
+ありません。
+`-OutputDirectory`を省略すると、変換後のworkbookは各`.xls`と同じfolderへ作成されます。
+別folderへまとめて出力する場合は`-OutputDirectory`、サブfolderも対象にする場合は
+`-Recurse`を指定します。明示した出力先は単一folderとなるため、同名の変換先は
+collisionとして報告し、書き込みません。進捗はstderr、最後のcompact JSON resultは
+集計だけを含む短い1件としてstdoutへ出力します。拡張子が厳密に`.xls`のfileだけを
+検査し、既存の`.xlsx`と`.xlsm`は対象外とします。
+
+### console出力、status、終了code
 
 人向け進捗はstderrへ`[LEVEL] message`として出します。pull、push、adoptの最後には、
-status件数とreport pathをindent付きsummaryで表示します。`push`では、処理対象のsource ID、
+status件数とreport pathをindent付きsummaryで表示します。`pull`では、`unchanged`以外の
+代理noteごとに、絶対pathの`notePath`と相対`sourcePath`を表示します。`push`では、処理対象のsource ID、
 workbook path、include pattern、notes設定を最初に表示します。その後、`unchanged`以外の
 fileごとの結果を確定するたびに、noteのfile nameと相対`sourcePath`を表示し、最後に
-indent付きのsummaryを表示します。`unchanged`は個別表示せず、最終summaryに総数だけを表示します。stdoutには
-従来どおりcompact JSONを1件だけ出します。`-v` / `--verbose`では、fieldごとのExcel値、
+indent付きのsummaryを表示します。`unchanged`は個別表示せず、最終summaryに総数だけを表示します。
+同期commandはstdoutの末尾にraw JSONを追加しません。最終summaryには`summary.json`の絶対pathを
+表示し、`details.json`とCSVのreview artifactも、表示されたreport folderへ従来どおり保存します。`config show`は解決済み設定を
+JSONとして引き続き表示します。`-v` / `--verbose`では、fieldごとのExcel値、
 Markdown値、base値、適用方向も表示します。`--quiet`、`--verbose`、`--no-color`を提供し、
 `NO_COLOR`も尊重します。
 
@@ -328,6 +394,27 @@ Markdown値、base値、適用方向も表示します。`--quiet`、`--verbose`
 重複ID、未対応file、読み取りエラーなど、確認が必要な項目だけを一覧表示します。
 追跡済みworkbookは個別表示せず、件数だけを表示します。確認項目の相対pathは分類ごとに
 最大20件を表示し、全件の詳細はrun reportに保存します。
+
+`push`のfile別status:
+
+| status | 意味 |
+| ------ | ---- |
+| `unchanged` | workbookと代理ノートに同期対象の差分がありません。個別ログには表示せず、summaryに総数だけを表示します。 |
+| `would-write` | 代理ノート側の変更をworkbookへ書き込む予定です。dry-runのため、まだ書き込んでいません。 |
+| `written` | workbookへの書き込みと検証が完了しました。 |
+| `missing-source` | 代理ノートに一意に対応するworkbookが見つかりません。workbookは変更しません。 |
+| `pull-required` | workbook側に取り込むべき変更があります。`push`では変更せず、`pull`で確認します。 |
+| `conflict` | base、workbook、代理ノートの比較で競合しました。内容を確認し、必要な場合だけ`--prefer-note`または`--prefer-source`を指定します。 |
+| `duplicate-id` | 同じ`TknExcelCatalogId`を持つworkbookが複数あり、一意に対応付けできません。 |
+| `rename-required` | rename要求がありますが、明示許可または設定されたadapterでの処理が必要です。 |
+| `rename-error` | rename先の名前、衝突、または関連fileの処理で問題が発生しました。 |
+| `read-error` | workbookまたは代理ノートの検出・読み取りに失敗しました。 |
+| `write-error` | workbookへの書き込みまたは書き込み後の検証に失敗しました。可能な範囲でrollbackします。 |
+
+`sourcePath`は、開始時に表示される選択sourceの`path`を基準にした相対pathです。
+root pathを各行で繰り返さず、reportをsourceの移動に対して扱いやすくするためです。
+`missing-source`は対応するworkbook自体がないため`sourcePath`を持たず、ログには代理ノートの
+file nameだけを表示します。
 
 - `0`: 成功
 - `1`: 実行・validation・partial write error

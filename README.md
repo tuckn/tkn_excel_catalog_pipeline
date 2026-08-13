@@ -5,9 +5,10 @@
 `tkn-excel-catalog` projects `.xlsx` and `.xlsm` workbooks into Markdown proxy notes and
 safely synchronizes selected metadata in both directions. Excel remains the source
 workbook; Markdown is a searchable catalog entry and metadata editing surface.
-
-The default for every mutating workflow is a report-only dry run. The tool never
-deletes a workbook or proxy note.
+Use `pull` to reflect Excel changes in Markdown and `push` to return Markdown changes
+to Excel. The CLI uses the last agreed synchronization state to determine the change
+direction and detect conflicts. Every mutating workflow defaults to a report-only dry
+run, and the tool never deletes a workbook or proxy note.
 
 ## Requirements
 
@@ -17,6 +18,8 @@ deletes a workbook or proxy note.
 
 Excel, Excel COM, and Obsidian are not required for metadata inspection. Obsidian is
 only relevant when proxy-note renames must update backlinks.
+Legacy `.xls` workbooks are outside the main CLI. See “Converting legacy `.xls`
+workbooks” under “Specifications” for the desktop Excel conversion workflow.
 
 ## Install
 
@@ -52,6 +55,8 @@ but does not guarantee that a package with the same version is rebuilt and reins
 
 ## Configure
 
+### Create the configuration file
+
 Create the user-wide configuration, then edit its example paths:
 
 ```console
@@ -62,6 +67,11 @@ This creates `~/.tkn/excel_catalog_pipeline/config.yaml`. Re-running the command
 safe: an identical file is left unchanged, and an edited file is not overwritten.
 `tkn-excel-catalog config init --force` explicitly replaces an existing edited file with
 the template, so use it only when discarding those edits is intentional.
+
+To begin using the CLI, replace `sources[].id`, `sources[].path`, and
+`sources[].notes.root` with the values for your environment.
+
+### Main settings
 
 The main settings are:
 
@@ -88,6 +98,8 @@ For Windows paths, YAML single quotes are recommended, for example
 `'C:\path\to\excel-workbooks'`. Inside single quotes, backslashes do not need to be
 doubled.
 
+### Inspect the effective configuration
+
 Configuration is merged in this order:
 
 1. `~/.tkn/excel_catalog_pipeline/config.yaml`
@@ -102,6 +114,8 @@ configuration without creating runtime files:
 tkn-excel-catalog config show
 tkn-excel-catalog --config C:\path\to\config.yaml config show
 ```
+
+### Example with subfolder scanning
 
 Source IDs must be unique. The schema supports multiple roots; use `--source <id>` to
 limit a run to one root.
@@ -128,40 +142,24 @@ sources:
 
 With `recursive: true`, the proxy-note tree mirrors each workbook's source-relative parent folder. For example, `2008/example.xlsx` becomes `2008/example.xlsx.md` below the notes root and records `sourceFileName: 2008/example.xlsx`. After externally moving existing workbooks into year folders, run `pull` first to review the plan and then `pull --write-notes`. Applying tracked proxy-note folder moves directly requires `rename_adapter: filesystem`.
 
-### Configuring renames and folder moves
-
-Renames and folder moves can originate in either direction, depending on where the user makes the change.
-
-| Changed location | Request detected by the CLI | Files changed when authorized |
-| --- | --- | --- |
-| Rename or move a workbook in Explorer or another external tool, then run `pull` | Rename or move the proxy note to match the source-relative workbook path | Proxy note |
-| Edit the proxy note Frontmatter `sourceFileName`, then run `push` | Rename or move the workbook within its source root | Workbook and proxy note |
-
-`rename_adapter` specifies, for each source, whether the CLI may handle that request directly on the filesystem.
-
-- `report-only`: The default. When a rename or folder move is required, the CLI changes no files and records a `rename-required` action in the run report.
-- `filesystem`: Allows the CLI to rename or move a workbook or proxy note using ordinary filesystem operations without backlink maintenance.
-
-Setting `filesystem` alone does not change files. The corresponding write options are also required.
-
-| Direction | Required setting and command |
-| --- | --- |
-| Rename or move the workbook first, then make the proxy note follow it | `rename_adapter: filesystem` and `pull --write-notes` |
-| Edit `sourceFileName`, then rename or move the workbook and proxy note | `rename_adapter: filesystem` and `push --write-excel --allow-rename` |
-
-`pull` and `push` without write options remain dry runs. `sync.allow_source_rename` is not used by the current rename authorization checks; use `rename_adapter` and the command options shown above.
-
-The affected file, current source and note paths, and reason for a `rename-required` action are recorded in `~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv` and `details.json`. When `pull` needs to move a proxy note, `details.json` also contains the requested note path and collision information. For `push`, the requested relative path remains visible in the edited Frontmatter `sourceFileName`. The CLI prints the report folder when the command finishes and, during `push`, also prints each `rename-required` result to stderr.
-
-`filesystem` moves Markdown files directly and does not update Obsidian backlinks, which is why `report-only` is the default. If backlink maintenance matters, review the report and rename the note manually in Obsidian, or keep using `report-only` until an appropriate external adapter is available.
+See “Renames and folder moves” under “Specifications” for change directions, required
+permissions, and Obsidian backlink considerations.
 
 ## Basic use
+
+Run mutating commands without write options first. Review the console summary and
+report folder, then repeat the same command with its explicit write option only when
+the plan matches your intent.
+
+### Check status
 
 Inventory configured workbooks and proxy notes:
 
 ```console
 tkn-excel-catalog status
 ```
+
+### Reflect Excel changes in Markdown
 
 Plan Excel-to-Markdown changes, then apply reviewed note writes:
 
@@ -187,6 +185,8 @@ values are written to `differences.csv`, one row per workbook field:
 tkn-excel-catalog -v pull --source example --prefer-source
 ```
 
+### Reflect Markdown changes in Excel
+
 Plan Markdown-to-Excel metadata changes, then apply reviewed workbook writes:
 
 ```console
@@ -194,26 +194,9 @@ tkn-excel-catalog push
 tkn-excel-catalog push --write-excel
 ```
 
-Per-file `push` statuses:
+See “Console output, statuses, and exit codes” under “Specifications” for status meanings.
 
-| Status | Meaning |
-| ------ | ------- |
-| `unchanged` | The workbook and proxy note have no synchronized differences. Individual logs omit these files; the summary reports only the total. |
-| `would-write` | Proxy-note changes are planned for the workbook. Dry-run mode has not written them yet. |
-| `written` | The workbook write and post-write verification completed. |
-| `missing-source` | No unique workbook matches the proxy note. No workbook is modified. |
-| `pull-required` | The workbook has changes that should be reviewed through `pull`; `push` does not modify it. |
-| `conflict` | The base, workbook, and proxy note comparison found a conflict. Review it before using `--prefer-note` or `--prefer-source`. |
-| `duplicate-id` | More than one workbook has the same `TknExcelCatalogId`, so matching is ambiguous. |
-| `rename-required` | A rename was requested but requires explicit permission or handling by the configured adapter. |
-| `rename-error` | The rename target, collision checks, or related file operation failed. |
-| `read-error` | Workbook or proxy-note discovery or reading failed. |
-| `write-error` | The workbook write or post-write verification failed. The command rolls back where possible. |
-
-`sourcePath` is relative to the selected source `path` shown at startup. This avoids
-repeating the source root on every line and keeps reports usable if the source root moves.
-A `missing-source` result has no matching workbook and therefore no `sourcePath`; its log
-shows only the proxy-note filename.
+### Limit the target
 
 Limit a push to one proxy note:
 
@@ -221,6 +204,8 @@ Limit a push to one proxy note:
 tkn-excel-catalog push --note example.xlsx.md
 tkn-excel-catalog push --note example.xlsx.md --write-excel
 ```
+
+### Assign workbook IDs
 
 Assign missing stable workbook IDs. This changes the OOXML custom properties only in
 write mode and creates a backup first:
@@ -230,7 +215,34 @@ tkn-excel-catalog adopt
 tkn-excel-catalog adopt --write-excel
 ```
 
-## Metadata contract
+## Specifications
+
+### Synchronization model and managed state
+
+The CLI does not compare only Excel and Markdown. For every workbook and metadata
+field, it compares these three inputs:
+
+```text
+Current Excel workbook metadata --------\
+Last agreed values (sync-state.json) -----+-> CLI three-way comparison -> pull / push / conflict
+Current Markdown proxy note -------------/
+```
+
+| Component | Role |
+| --- | --- |
+| Excel workbook | Holds the actual `.xlsx` / `.xlsm` data and its current OOXML metadata. |
+| Markdown proxy note | Acts as the searchable catalog entry and the editing surface for metadata that `push` can return to Excel. |
+| `~/.tkn/excel_catalog_pipeline/state/sync-state.json` | Application-owned synchronization state. It stores the workbook ID, source and note paths, and the `baseMetadata` values on which both sides last agreed. It is not a user metadata editing surface. |
+
+For example, if only the Excel title changed since the last agreement, that field is
+a `pull` candidate. If only Markdown changed, it is a `push` candidate. If both sides
+changed from the previous value to different values, the result is a `conflict` rather
+than an automatic overwrite. After an explicit write, only fields whose Excel and
+Markdown values actually agree become the new base in `sync-state.json`. A dry run
+does not update this state. Per-run files such as `summary.json` and `differences.csv`
+are review reports, separate from the persistent synchronization state above.
+
+### Metadata contract
 
 | Markdown proxy note | Excel core property                   |
 | ------------------- | ------------------------------------- |
@@ -268,7 +280,7 @@ headings, section order, and default description, are owned by the application p
 as a package resource and is not a user configuration file. Python owns resource
 loading and validation, dynamic workbook content, and safe marker replacement.
 
-## Conflict and rename behavior
+### Conflict detection and resolution
 
 Synchronization uses field-level three-way comparison between the previous base,
 current workbook, and current note. Different changes on both sides return exit code
@@ -281,9 +293,35 @@ After a partial `pull` or `push`, the base advances only for fields whose workbo
 proxy-note values actually agree. An unresolved change in the opposite direction is
 kept for the next command instead of being marked as synchronized.
 
-See “Configuring renames and folder moves” under “Configure” for the two detection directions, required options, and report locations. A rename target must be a valid, collision-free source-relative path that stays inside the source root and preserves the current workbook extension.
+### Renames and folder moves
 
-## Outputs and safety
+Renames and folder moves can originate in either direction, depending on where the user makes the change.
+
+| Changed location | Request detected by the CLI | Files changed when authorized |
+| --- | --- | --- |
+| Rename or move a workbook in Explorer or another external tool, then run `pull` | Rename or move the proxy note to match the source-relative workbook path | Proxy note |
+| Edit the proxy note Frontmatter `sourceFileName`, then run `push` | Rename or move the workbook within its source root | Workbook and proxy note |
+
+`rename_adapter` specifies, for each source, whether the CLI may handle that request directly on the filesystem.
+
+- `report-only`: The default. When a rename or folder move is required, the CLI changes no files and records a `rename-required` action in the run report.
+- `filesystem`: Allows the CLI to rename or move a workbook or proxy note using ordinary filesystem operations without backlink maintenance.
+
+Setting `filesystem` alone does not change files. The corresponding write options are also required.
+
+| Direction | Required setting and command |
+| --- | --- |
+| Rename or move the workbook first, then make the proxy note follow it | `rename_adapter: filesystem` and `pull --write-notes` |
+| Edit `sourceFileName`, then rename or move the workbook and proxy note | `rename_adapter: filesystem` and `push --write-excel --allow-rename` |
+
+`pull` and `push` without write options remain dry runs. `sync.allow_source_rename` is not used by the current rename authorization checks; use `rename_adapter` and the command options shown above.
+
+The affected file, current source and note paths, and reason for a `rename-required` action are recorded in `~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv` and `details.json`. When `pull` needs to move a proxy note, `details.json` also contains the requested note path and collision information. For `push`, the requested relative path remains visible in the edited Frontmatter `sourceFileName`. The CLI prints the report folder when the command finishes and, during `push`, also prints each `rename-required` result to stderr.
+
+A rename target must be a valid, collision-free source-relative path that stays inside the source root and preserves the current workbook extension.
+`filesystem` moves Markdown files directly and does not update Obsidian backlinks, which is why `report-only` is the default. If backlink maintenance matters, review the report and rename the note manually in Obsidian, or keep using `report-only` until an appropriate external adapter is available.
+
+### Run reports and synchronization state
 
 Run reports are stored under:
 
@@ -306,6 +344,8 @@ the command that produced the row.
 three-way `direction`, and the explicit `plannedDirection`. This makes empty-value
 deletions and source-authoritative recovery reviewable without reading JSON.
 
+### Workbook write safety
+
 Workbook writes:
 
 - support `.xlsx` and `.xlsm` only;
@@ -323,15 +363,43 @@ Encrypted workbooks, `.xls`, `.xlsb`, deletion synchronization, format conversio
 and workbook layout/shape semantics are outside the MVP. Extracted cell text is a
 search aid, not a complete workbook representation.
 
-## Console and exit codes
+### Converting legacy `.xls` workbooks
+
+The optional Windows helper script uses desktop Excel to convert legacy `.xls`
+workbooks before cataloging them. It keeps the source files, refuses to overwrite
+existing output, saves VBA workbooks as `.xlsm`, and saves other workbooks as
+`.xlsx`. Desktop Excel is required only for this conversion helper.
+
+First inspect the plan, then repeat with the explicit write switch:
+
+```console
+.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks"
+.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks" -Write
+```
+
+`-SourcePath` identifies the folder containing the source `.xls` workbooks; it
+does not select the output destination.
+When `-OutputDirectory` is omitted, each converted workbook is saved next to its
+source `.xls` workbook. Use `-OutputDirectory` to collect the results in another
+folder or `-Recurse` to include subfolders. An explicitly selected output folder
+is flat; duplicate output names are reported and not written. Progress is written
+to stderr, followed by one short, summary-only JSON result on stdout. Only files
+whose extension is exactly `.xls` are inspected; existing `.xlsx` and `.xlsm`
+workbooks are ignored.
+
+### Console output, statuses, and exit codes
 
 Human-readable progress goes to stderr as `[LEVEL] message`. Pull, push, and adopt end
-with an indented summary containing status counts and report paths. For `push`, progress includes
+with an indented summary containing status counts and report paths. `pull` lists each
+non-unchanged proxy-note result with its full `notePath` and relative `sourcePath`. For `push`, progress includes
 the selected source configuration (`id`, workbook path, include patterns, and note
 settings), one result line as each non-unchanged file result is determined, and an
 indented final summary. Per-file lines use the note filename and relative `sourcePath`
 instead of repeating the full note path. Unchanged files appear only as a count in the summary.
-One compact JSON result still goes to stdout. `-v` / `--verbose` adds per-field Excel,
+Synchronization commands do not append raw JSON to stdout; the final summary displays the
+full `summary.json` path, and `details.json` plus the CSV review artifacts remain available
+in the displayed report folder. `config show`
+continues to print its resolved configuration as JSON. `-v` / `--verbose` adds per-field Excel,
 Markdown, base, and planned-direction comparisons. Use `--quiet`, `--verbose`, or
 `--no-color`; `NO_COLOR` is honored.
 
@@ -340,6 +408,27 @@ such as untracked workbooks, untracked proxy notes, duplicate IDs, unsupported f
 read errors. Tracked workbooks are reported as a count rather than listed individually.
 Each attention category shows at most 20 relative paths; the run report contains the full
 details.
+
+Per-file `push` statuses:
+
+| Status | Meaning |
+| ------ | ------- |
+| `unchanged` | The workbook and proxy note have no synchronized differences. Individual logs omit these files; the summary reports only the total. |
+| `would-write` | Proxy-note changes are planned for the workbook. Dry-run mode has not written them yet. |
+| `written` | The workbook write and post-write verification completed. |
+| `missing-source` | No unique workbook matches the proxy note. No workbook is modified. |
+| `pull-required` | The workbook has changes that should be reviewed through `pull`; `push` does not modify it. |
+| `conflict` | The base, workbook, and proxy note comparison found a conflict. Review it before using `--prefer-note` or `--prefer-source`. |
+| `duplicate-id` | More than one workbook has the same `TknExcelCatalogId`, so matching is ambiguous. |
+| `rename-required` | A rename was requested but requires explicit permission or handling by the configured adapter. |
+| `rename-error` | The rename target, collision checks, or related file operation failed. |
+| `read-error` | Workbook or proxy-note discovery or reading failed. |
+| `write-error` | The workbook write or post-write verification failed. The command rolls back where possible. |
+
+`sourcePath` is relative to the selected source `path` shown at startup. This avoids
+repeating the source root on every line and keeps reports usable if the source root moves.
+A `missing-source` result has no matching workbook and therefore no `sourcePath`; its log
+shows only the proxy-note filename.
 
 - `0`: success
 - `1`: execution, validation, or partial write error

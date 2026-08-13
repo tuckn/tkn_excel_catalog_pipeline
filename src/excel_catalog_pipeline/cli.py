@@ -240,8 +240,40 @@ def _log_push_action(logger: logging.Logger, action: Action) -> None:
     logger.log(level, "[%s] %s", action.status, " | ".join(fields))
 
 
+def _log_pull_action(logger: logging.Logger, action: Action) -> None:
+    if action.status == "unchanged":
+        return
+    if action.status in {"created", "updated"}:
+        level = SUCCESS
+    elif action.status.endswith("error"):
+        level = logging.ERROR
+    elif action.conflict_fields or action.status in {
+        "conflict",
+        "duplicate-id",
+        "missing-source",
+        "push-required",
+        "rename-required",
+    }:
+        level = logging.WARNING
+    else:
+        level = logging.INFO
+    fields: list[str] = []
+    if action.note_path:
+        fields.append(f"notePath={_one_line(action.note_path)}")
+    desired_note_path = action.details.get("desiredNotePath")
+    if desired_note_path:
+        fields.append(f"desiredNotePath={_one_line(str(desired_note_path))}")
+    if action.source_path:
+        fields.append(f"sourcePath={_one_line(action.source_path)}")
+    if action.message and not action.message.startswith("stateMatch="):
+        fields.append(f"message={_one_line(action.message)}")
+    logger.log(level, "[%s] %s", action.status, " | ".join(fields) or "-")
+
+
 def _log_readable_summary(logger: logging.Logger, summary: dict[str, Any]) -> None:
     mode = "write" if summary.get("writeEnabled") else "dry-run"
+    report_path = summary.get("reportPath")
+    summary_path = str(Path(str(report_path)) / "summary.json") if report_path else "-"
     lines = [
         f"  command: {summary.get('command', '-')}",
         f"  mode: {mode}",
@@ -258,7 +290,8 @@ def _log_readable_summary(logger: logging.Logger, summary: dict[str, Any]) -> No
         lines.append("    none")
     lines.extend(
         [
-            f"  report: {summary.get('reportPath', '-')}",
+            f"  report: {report_path or '-'}",
+            f"  summary JSON: {summary_path}",
             f"  differences CSV: {summary.get('differencesPath', '-')}",
         ]
     )
@@ -412,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
                 write_notes=args.write_notes,
                 preference=_preference(args),
             )
+            for action in actions:
+                _log_pull_action(logger, action)
             write_enabled = bool(args.write_notes)
         elif args.command == "push":
             if args.allow_rename and not args.write_excel:
@@ -457,16 +492,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command in {"pull", "push", "adopt"}:
             _log_readable_summary(logger, summary)
-        _emit(summary)
         return _exit_code(summary)
     except (ConfigError, StateError) as exc:
         logger.error("%s", exc)
-        _emit({"status": "config-error", "command": args.command, "message": str(exc)})
+        if args.command == "config":
+            _emit({"status": "config-error", "command": args.command, "message": str(exc)})
         return 3
     except Exception as exc:  # pragma: no cover - last-resort CLI boundary
         if args.verbose:
             logger.exception("Unexpected failure")
         else:
             logger.error("Unexpected failure: %s", exc)
-        _emit({"status": "error", "command": args.command, "message": str(exc)})
+        if args.command == "config":
+            _emit({"status": "error", "command": args.command, "message": str(exc)})
         return 1

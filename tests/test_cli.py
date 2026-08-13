@@ -63,8 +63,13 @@ sources:
         encoding="utf-8",
     )
     result = main(["--config", str(config), "--report-dir", str(tmp_path / "reports"), "pull"])
-    payload = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    summary_path = next((tmp_path / "reports").glob("*-pull/summary.json"))
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert result == 0
+    assert captured.out == ""
+    assert f"[INFO] [would-create] notePath={notes / 'book.xlsx.md'}" in captured.err
+    assert "sourcePath=book.xlsx" in captured.err
     assert payload["statusCounts"] == {"would-create": 1}
     assert Path(payload["reportPath"], "summary.json").exists()
     details = json.loads(Path(payload["reportPath"], "details.json").read_text(encoding="utf-8"))
@@ -120,9 +125,8 @@ sources:
     result = main(["--config", str(config), "--report-dir", str(tmp_path / "reports"), "status"])
     captured = capsys.readouterr()
 
-    payload = json.loads(captured.out)
     assert result == 0
-    assert captured.out.count("\n") == 1
+    assert captured.out == ""
     assert "[INFO] Status results:\n  example:" in captured.err
     assert "    tracked workbooks: 1" in captured.err
     assert "    untracked workbooks: 1" in captured.err
@@ -140,6 +144,8 @@ sources:
     )
     assert str(notes.resolve()) not in captured.err
     assert "tracked.xlsx" not in captured.err
+    summary_path = next((tmp_path / "reports").glob("*-status/summary.json"))
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["statusCounts"] == {
         "tracked": 1,
         "untracked-source": 1,
@@ -207,9 +213,8 @@ sources:
     )
     captured = capsys.readouterr()
 
-    payload = json.loads(captured.out)
     assert result == 2
-    assert captured.out.count("\n") == 1
+    assert captured.out == ""
     assert "[INFO] Running push for 1 configured source(s): example." in captured.err
     assert "[INFO] Selected source configuration:\n  - id: example" in captured.err
     assert f"    path: '{workbooks.resolve()}'" in captured.err
@@ -240,6 +245,8 @@ sources:
     assert "  mode: write" in captured.err
     assert "  status counts:\n    written: 1\n    unchanged: 1" in captured.err
     assert "  differences CSV:" in captured.err
+    summary_path = next((tmp_path / "reports").glob("*-push/summary.json"))
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["statusCounts"]["unchanged"] == 1
 
 
@@ -296,8 +303,12 @@ sources:
     )
     captured = capsys.readouterr()
 
-    payload = json.loads(captured.out)
     assert result == 0
+    assert captured.out == ""
+    assert (
+        f"[INFO] [would-update] notePath={tmp_path / 'notes' / 'nested' / 'book.xlsx.md'} | "
+        "sourcePath=nested/book.xlsx" in captured.err
+    )
     assert "[DEBUG] Metadata differences:" in captured.err
     assert "[would-update] nested/book.xlsx" in captured.err
     assert (
@@ -307,6 +318,9 @@ sources:
     assert "[INFO] Summary:\n  command: pull\n  mode: dry-run" in captured.err
     assert "    would-update: 1\n    unchanged: 1" in captured.err
 
+    summary_path = next((tmp_path / "reports").glob("*-pull/summary.json"))
+    assert f"  summary JSON: {summary_path}" in captured.err
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
     differences_path = Path(payload["differencesPath"])
     assert differences_path.exists()
     with differences_path.open(encoding="utf-8-sig", newline="") as handle:
