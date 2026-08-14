@@ -222,10 +222,14 @@ tkn-excel-catalog adopt --write-excel
 The CLI does not compare only Excel and Markdown. For every workbook and metadata
 field, it compares these three inputs:
 
-```text
-Current Excel workbook metadata --------\
-Last agreed values (sync-state.json) -----+-> CLI three-way comparison -> pull / push / conflict
-Current Markdown proxy note -------------/
+```mermaid
+flowchart LR
+    excel["Current Excel workbook metadata"] --> compare["CLI three-way comparison"]
+    base["Last agreed values<br/>(sync-state.json)"] --> compare
+    note["Current Markdown proxy note"] --> compare
+    compare -->|"Only Excel changed"| pull["pull"]
+    compare -->|"Only Markdown changed"| push["push"]
+    compare -->|"Both changed differently"| conflict["conflict"]
 ```
 
 | Component | Role |

@@ -218,10 +218,14 @@ tkn-excel-catalog adopt --write-excel
 このCLIはExcelとMarkdownの二者だけを比較するのではなく、次の3つを
 workbookごと、metadata fieldごとに比較します。
 
-```text
-現在のExcel workbook metadata -------\
-前回一致した値 (sync-state.json) ---+-> CLIの三方向比較 -> pull / push / conflict
-現在のMarkdown代理ノート ---------/
+```mermaid
+flowchart LR
+    excel["現在のExcel workbook metadata"] --> compare["CLIの三方向比較"]
+    base["前回一致した値<br/>(sync-state.json)"] --> compare
+    note["現在のMarkdown代理ノート"] --> compare
+    compare -->|"Excel側だけ変更"| pull["pull"]
+    compare -->|"Markdown側だけ変更"| push["push"]
+    compare -->|"双方が別々に変更"| conflict["conflict"]
 ```
 
 | 構成要素 | 役割 |
