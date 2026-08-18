@@ -10,9 +10,10 @@ contain a VBA project are converted to .xlsm; all others are converted to
 .xlsx. The source files are never deleted or overwritten, and existing output
 files are skipped.
 
-The default mode is a dry run. Add -Write to create the converted workbooks.
-Progress is written to stderr and one summary-only JSON result is written to
-stdout. The JSON does not repeat the per-workbook results.
+Normal execution creates the converted workbooks. Add -DryRun to validate the
+inputs and show the planned destinations without creating output folders or
+workbooks. Progress is written to stderr and one summary-only JSON result is
+written to stdout. The JSON does not repeat the per-workbook results.
 
 .PARAMETER SourcePath
 Source folder containing the legacy .xls workbooks to convert. Defaults to the
@@ -27,14 +28,20 @@ Includes .xls workbooks in subfolders. With the default output behavior, each
 converted workbook is saved next to its source. When OutputDirectory is set,
 the output is flat, so duplicate output names are reported as collisions.
 
+.PARAMETER DryRun
+Shows and validates the conversion plan without creating output folders or
+workbooks. Desktop Excel is still started and each source workbook is opened
+read-only so that the required output format can be determined accurately.
+
 .PARAMETER Write
-Creates the converted workbooks. Without this switch, only the plan is shown.
+Deprecated compatibility switch. Normal execution already writes. Do not use
+this switch together with -DryRun.
 
 .EXAMPLE
 .\scripts\Convert-XlsToOpenXml.ps1 -SourcePath 'C:\path\to\legacy-workbooks'
 
 .EXAMPLE
-.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath 'C:\path\to\legacy-workbooks' -Write
+.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath 'C:\path\to\legacy-workbooks' -DryRun
 #>
 
 [CmdletBinding()]
@@ -46,11 +53,19 @@ param(
 
     [switch]$Recurse,
 
+    [switch]$DryRun,
+
     [switch]$Write
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($DryRun -and $Write) {
+    throw "-DryRun and the deprecated -Write switch cannot be combined."
+}
+
+$writeEnabled = -not $DryRun
 
 function Write-ProgressLine {
     param(
@@ -141,8 +156,15 @@ $plannedDestinations = [System.Collections.Generic.HashSet[string]]::new(
 )
 $excel = $null
 
+if ($Write) {
+    Write-ProgressLine "WARNING" (
+        "-Write is deprecated and no longer required; normal execution writes. " +
+        "Use -DryRun for a read-only preview."
+    )
+}
+
 Write-ProgressLine "INFO" ("Mode={0} | Source={1} | Output={2} | Files={3}" -f (
-        $(if ($Write) { "write" } else { "dry-run" })
+        $(if ($writeEnabled) { "write" } else { "dry-run" })
     ), $sourceRoot, $outputLabel, $files.Count)
 
 if ($files.Count -gt 0) {
@@ -163,7 +185,7 @@ if ($files.Count -gt 0) {
     }
 
     if ($null -ne $excel) {
-        if ($Write -and $hasExplicitOutput) {
+        if ($writeEnabled -and $hasExplicitOutput) {
             [void](New-Item -ItemType Directory -Path $outputRoot -Force)
         }
 
@@ -201,7 +223,7 @@ if ($files.Count -gt 0) {
                         continue
                     }
 
-                    if (-not $Write) {
+                    if (-not $writeEnabled) {
                         Add-Result -Results $results -Status "would-convert" -Source $file `
                             -Destination $destination -HasVba $hasVba
                         Write-ProgressLine "INFO" ("[would-convert] {0} -> {1}" -f $file.Name, $destination)
@@ -244,7 +266,7 @@ foreach ($status in @("would-convert", "converted", "skipped-existing", "collisi
 }
 
 $summary = [ordered]@{
-    mode            = if ($Write) { "write" } else { "dry-run" }
+    mode            = if ($writeEnabled) { "write" } else { "dry-run" }
     sourcePath      = $sourceRoot
     outputMode      = if ($hasExplicitOutput) { "specified-directory" } else { "alongside-input" }
     outputDirectory = $outputRoot

@@ -7,8 +7,9 @@ safely synchronizes selected metadata in both directions. Excel remains the sour
 workbook; Markdown is a searchable catalog entry and metadata editing surface.
 Use `pull` to reflect Excel changes in Markdown and `push` to return Markdown changes
 to Excel. The CLI uses the last agreed synchronization state to determine the change
-direction and detect conflicts. Every mutating workflow defaults to a report-only dry
-run, and the tool never deletes a workbook or proxy note.
+direction and detect conflicts. Normal `pull`, `push`, and `adopt` execution performs
+the changes named by the command; add `--dry-run` for a read-only preview. The tool
+never deletes a workbook or proxy note.
 
 ## Requirements
 
@@ -37,6 +38,13 @@ This installs the current code, package resources, and dependencies into the
 automatically. The final command verifies the CLI entry point. Use
 `tkn-excel-catalog config show` to inspect the effective configuration and
 `tkn-excel-catalog --version` to check the version.
+
+Version `0.2.0` changes the execution boundary: optionless `pull`, `push`, and `adopt`
+now write, while `--dry-run` is the only preview mode. Before reinstalling, update any
+Task Scheduler task, shell script, or saved procedure that relied on the `0.1.x`
+optionless dry run. The old `--write-notes` and `--write-excel` options remain accepted
+during the `0.2.x` compatibility period, perform the same normal write, and emit a
+deprecation warning.
 
 After `git pull` or another repository update, reinstall the tool:
 
@@ -86,13 +94,12 @@ The main settings are:
 | `sources[].notes.root` | Proxy-note folder: `pull` writes here and `push` reads from here. |
 | `sources[].notes.profile` | Note-format profile; keep `tkn-obsidian-v1` in the current version. |
 | `sources[].notes.frontmatter_term_format` | Format for `keywords` and `categories`: `obsidian-link` (default) writes `[[term]]`; `plain` writes ordinary strings. |
-| `sources[].notes.rename_adapter` | Controls rename and folder-move handling. The default `report-only` changes no files; `filesystem` performs direct changes only with the explicit write options described below. |
+| `sources[].notes.rename_adapter` | Controls rename and folder-move handling. The default `report-only` changes no paths; `filesystem` permits direct changes during normal execution as described below. |
 | `sync.max_extracted_text_chars` | Maximum extracted workbook text stored in a proxy note. |
 
 The remaining `sync` booleans document safety policy for future extension. The
 current version always preserves unknown note metadata, never deletes files, and
-still requires `push --write-excel --allow-rename` before a workbook rename can be
-applied.
+still requires `push --allow-rename` before a workbook rename can be applied.
 
 For Windows paths, YAML single quotes are recommended, for example
 `'C:\path\to\excel-workbooks'`. Inside single quotes, backslashes do not need to be
@@ -140,16 +147,19 @@ sources:
       rename_adapter: filesystem
 ```
 
-With `recursive: true`, the proxy-note tree mirrors each workbook's source-relative parent folder. For example, `2008/example.xlsx` becomes `2008/example.xlsx.md` below the notes root and records `sourceFileName: 2008/example.xlsx`. After externally moving existing workbooks into year folders, run `pull` first to review the plan and then `pull --write-notes`. Applying tracked proxy-note folder moves directly requires `rename_adapter: filesystem`.
+With `recursive: true`, the proxy-note tree mirrors each workbook's source-relative parent folder. For example, `2008/example.xlsx` becomes `2008/example.xlsx.md` below the notes root and records `sourceFileName: 2008/example.xlsx`. After externally moving existing workbooks into year folders, run `pull --dry-run` first to review the plan and then run `pull` normally. Applying tracked proxy-note folder moves directly requires `rename_adapter: filesystem`.
 
 See “Renames and folder moves” under “Specifications” for change directions, required
 permissions, and Obsidian backlink considerations.
 
 ## Basic use
 
-Run mutating commands without write options first. Review the console summary and
-report folder, then repeat the same command with its explicit write option only when
-the plan matches your intent.
+Optionless `pull`, `push`, and `adopt` perform their named changes. Add `--dry-run`
+when you need a read-only preview first. Dry-run uses the same configuration, input
+validation, three-way comparison, conflict checks, path checks, and protection rules,
+but it writes no workbook, proxy note, synchronization state, cache, backup, or run
+report. These commands use no network access, authentication, external service, or
+generative AI in either mode.
 
 ### Check status
 
@@ -161,37 +171,37 @@ tkn-excel-catalog status
 
 ### Reflect Excel changes in Markdown
 
-Plan Excel-to-Markdown changes, then apply reviewed note writes:
+Apply Excel-to-Markdown changes, or preview the same decision without writing:
 
 ```console
 tkn-excel-catalog pull
-tkn-excel-catalog pull --write-notes
+tkn-excel-catalog pull --dry-run
 ```
 
 Normal `pull` preserves metadata that appears to have been edited only in Markdown.
-After reviewing the dry-run report, use `--prefer-source` when Excel must be treated as
+After reviewing the dry-run console output, use `--prefer-source` when Excel must be treated as
 authoritative for every differing metadata field, including recovery from incorrect
 historical synchronization state:
 
 ```console
 tkn-excel-catalog pull --source example --prefer-source
-tkn-excel-catalog pull --source example --prefer-source --write-notes
+tkn-excel-catalog pull --source example --prefer-source --dry-run
 ```
 
 Add global `-v` before the subcommand to print each metadata comparison. The same full
 values are written to `differences.csv`, one row per workbook field:
 
 ```console
-tkn-excel-catalog -v pull --source example --prefer-source
+tkn-excel-catalog -v pull --source example --prefer-source --dry-run
 ```
 
 ### Reflect Markdown changes in Excel
 
-Plan Markdown-to-Excel metadata changes, then apply reviewed workbook writes:
+Apply Markdown-to-Excel metadata changes with a backup, or preview without writing:
 
 ```console
 tkn-excel-catalog push
-tkn-excel-catalog push --write-excel
+tkn-excel-catalog push --dry-run
 ```
 
 See “Console output, statuses, and exit codes” under “Specifications” for status meanings.
@@ -202,17 +212,17 @@ Limit a push to one proxy note:
 
 ```console
 tkn-excel-catalog push --note example.xlsx.md
-tkn-excel-catalog push --note example.xlsx.md --write-excel
+tkn-excel-catalog push --note example.xlsx.md --dry-run
 ```
 
 ### Assign workbook IDs
 
-Assign missing stable workbook IDs. This changes the OOXML custom properties only in
-write mode and creates a backup first:
+Assign missing stable workbook IDs. Normal execution changes only the OOXML custom
+properties and creates a backup first; dry-run lists the targets without assigning IDs:
 
 ```console
 tkn-excel-catalog adopt
-tkn-excel-catalog adopt --write-excel
+tkn-excel-catalog adopt --dry-run
 ```
 
 ## Specifications
@@ -241,10 +251,11 @@ flowchart LR
 For example, if only the Excel title changed since the last agreement, that field is
 a `pull` candidate. If only Markdown changed, it is a `push` candidate. If both sides
 changed from the previous value to different values, the result is a `conflict` rather
-than an automatic overwrite. After an explicit write, only fields whose Excel and
+than an automatic overwrite. After normal execution, only fields whose Excel and
 Markdown values actually agree become the new base in `sync-state.json`. A dry run
 does not update this state. Per-run files such as `summary.json` and `differences.csv`
-are review reports, separate from the persistent synchronization state above.
+are execution reports, separate from the persistent synchronization state above.
+Dry-run does not create these reports.
 
 ### Metadata contract
 
@@ -273,9 +284,9 @@ Proxy notes are named `<workbook-name>.xlsx.md` or `<workbook-name>.xlsm.md`. Re
 Generated body sections are enclosed by `excel-catalog` markers. Unknown Frontmatter
 fields and text outside those markers are preserved. Workbook core metadata and the stable
 custom ID live in Frontmatter, so schema 2.0 no longer generates `## Excel Metadata` and
-removes the legacy managed section on an explicit note write.
+removes the legacy managed section on a normal note write.
 Legacy proxy notes without `schemaVersion`, or with schema 1.0 `noun` / `nouns`, remain
-readable. A reviewed, explicit note write adds the current profile version; a dry run does
+readable. A normal note write adds the current profile version; a dry run does
 not modify the note.
 
 The generated Frontmatter contract and body structure, including `schemaVersion`,
@@ -308,19 +319,19 @@ Renames and folder moves can originate in either direction, depending on where t
 
 `rename_adapter` specifies, for each source, whether the CLI may handle that request directly on the filesystem.
 
-- `report-only`: The default. When a rename or folder move is required, the CLI changes no files and records a `rename-required` action in the run report.
+- `report-only`: The default. When a rename or folder move is required, the CLI changes no paths and records a `rename-required` action in console output and, outside dry-run, the run report.
 - `filesystem`: Allows the CLI to rename or move a workbook or proxy note using ordinary filesystem operations without backlink maintenance.
 
-Setting `filesystem` alone does not change files. The corresponding write options are also required.
+Setting `filesystem` alone does not change files. A corresponding normal command must run.
 
 | Direction | Required setting and command |
 | --- | --- |
-| Rename or move the workbook first, then make the proxy note follow it | `rename_adapter: filesystem` and `pull --write-notes` |
-| Edit `sourceFileName`, then rename or move the workbook and proxy note | `rename_adapter: filesystem` and `push --write-excel --allow-rename` |
+| Rename or move the workbook first, then make the proxy note follow it | `rename_adapter: filesystem` and normal `pull` |
+| Edit `sourceFileName`, then rename or move the workbook and proxy note | `rename_adapter: filesystem` and normal `push --allow-rename` |
 
-`pull` and `push` without write options remain dry runs. `sync.allow_source_rename` is not used by the current rename authorization checks; use `rename_adapter` and the command options shown above.
+Add `--dry-run` to either command to validate and preview the same operation without moving files. For a push-side rename preview, retain `--allow-rename` so the CLI validates the requested destination exactly as normal execution would. `sync.allow_source_rename` is not used by the current rename authorization checks; use `rename_adapter` and the command options shown above.
 
-The affected file, current source and note paths, and reason for a `rename-required` action are recorded in `~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv` and `details.json`. When `pull` needs to move a proxy note, `details.json` also contains the requested note path and collision information. For `push`, the requested relative path remains visible in the edited Frontmatter `sourceFileName`. The CLI prints the report folder when the command finishes and, during `push`, also prints each `rename-required` result to stderr.
+The affected file, current source and note paths, and reason for a `rename-required` action are printed to stderr. Normal execution also records them in `~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv` and `details.json`. When `pull` needs to move a proxy note, `details.json` also contains the requested note path and collision information. For `push`, the requested relative path remains visible in the edited Frontmatter `sourceFileName`. Dry-run creates no report, so use `-v` when field-level preview detail is needed.
 
 A rename target must be a valid, collision-free source-relative path that stays inside the source root and preserves the current workbook extension.
 `filesystem` moves Markdown files directly and does not update Obsidian backlinks, which is why `report-only` is the default. If backlink maintenance matters, review the report and rename the note manually in Obsidian, or keep using `report-only` until an appropriate external adapter is available.
@@ -338,8 +349,15 @@ Run reports are stored under:
 ```
 
 Synchronization base state is `~/.tkn/excel_catalog_pipeline/state/sync-state.json`.
-Backups are under the adjacent `backups/` directory. Dry runs may create reports, but
-do not modify workbooks, notes, synchronization state, or cache.
+Backups are under the adjacent `backups/` directory. Normal `pull`, `push`, and `adopt`
+runs create reports. Dry-run creates, updates, or deletes no persistent application
+file: no workbook, note, synchronization state, cache, backup, or report. It may read
+the configured local files and existing state to calculate an accurate preview. It
+does not use network access, authentication, downloads, external services, or paid
+computation, and it leaves no application temporary file behind.
+The preview is a snapshot, not a guarantee that a later normal run will be identical.
+Normal execution rereads the inputs and rechecks conflicts, collisions, signatures,
+locks, and other protection conditions immediately before each applicable change.
 Per-file report rows distinguish direction explicitly: `sourceToNoteFields` lists
 workbook values to apply through `pull`, while `noteToSourceFields` lists proxy-note
 values to apply through `push`. `changedFields` lists the fields applied or planned by
@@ -374,11 +392,12 @@ workbooks before cataloging them. It keeps the source files, refuses to overwrit
 existing output, saves VBA workbooks as `.xlsm`, and saves other workbooks as
 `.xlsx`. Desktop Excel is required only for this conversion helper.
 
-First inspect the plan, then repeat with the explicit write switch:
+Normal execution converts the eligible workbooks. Add `-DryRun` to inspect and validate
+the plan without creating an output directory or workbook:
 
 ```console
 .\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks"
-.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks" -Write
+.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks" -DryRun
 ```
 
 `-SourcePath` identifies the folder containing the source `.xls` workbooks; it
@@ -389,20 +408,25 @@ folder or `-Recurse` to include subfolders. An explicitly selected output folder
 is flat; duplicate output names are reported and not written. Progress is written
 to stderr, followed by one short, summary-only JSON result on stdout. Only files
 whose extension is exactly `.xls` are inspected; existing `.xlsx` and `.xlsm`
-workbooks are ignored.
+workbooks are ignored. Both modes start desktop Excel and open each source read-only
+to detect VBA and the planned output format; macros, events, link updates, and alerts
+remain disabled. The legacy `-Write` switch is accepted during the `0.2.x`
+compatibility period as a deprecated no-op for normal execution.
 
 ### Console output, statuses, and exit codes
 
 Human-readable progress goes to stderr as `[LEVEL] message`. Pull, push, and adopt end
-with an indented summary containing status counts and report paths. `pull` lists each
+with an indented summary containing status counts. Normal execution includes report
+paths; dry-run explicitly shows that no persistent report was written. `pull` lists each
 non-unchanged proxy-note result with its full `notePath` and relative `sourcePath`. For `push`, progress includes
 the selected source configuration (`id`, workbook path, include patterns, and note
 settings), one result line as each non-unchanged file result is determined, and an
 indented final summary. Per-file lines use the note filename and relative `sourcePath`
 instead of repeating the full note path. Unchanged files appear only as a count in the summary.
-Synchronization commands do not append raw JSON to stdout; the final summary displays the
-full `summary.json` path, and `details.json` plus the CSV review artifacts remain available
-in the displayed report folder. `config show`
+Synchronization commands do not append raw JSON to stdout. After normal execution, the
+final summary displays the full `summary.json` path, and `details.json` plus the CSV
+artifacts remain available in the displayed report folder. Dry-run displays planned
+counts, targets, paths, reasons, and conflicts on stderr without creating these artifacts. `config show`
 continues to print its resolved configuration as JSON. `-v` / `--verbose` adds per-field Excel,
 Markdown, base, and planned-direction comparisons. Use `--quiet`, `--verbose`, or
 `--no-color`; `NO_COLOR` is honored.

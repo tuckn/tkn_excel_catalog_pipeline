@@ -15,7 +15,7 @@ from . import __version__
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
 from .models import Action, SourceConfig
 from .pipeline import run_adopt, run_pull, run_push, run_status
-from .reports import write_report
+from .reports import summarize_actions, write_report
 from .state import StateError
 
 SUCCESS = 25
@@ -92,6 +92,28 @@ def _add_preference(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_execution_mode(parser: argparse.ArgumentParser, *, legacy_write_option: str) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Preview and validate planned changes without writing workbooks, notes, "
+            "state, cache, reports, or external systems. This CLI uses no network, "
+            "authentication, downloads, external services, or generative AI in either mode."
+        ),
+    )
+    group.add_argument(
+        legacy_write_option,
+        dest="legacy_write",
+        action="store_true",
+        help=(
+            "Deprecated compatibility option. Normal execution already writes; "
+            "use --dry-run to preview."
+        ),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tkn-excel-catalog",
@@ -99,7 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", type=Path, help="Explicit YAML config file.")
-    parser.add_argument("--report-dir", type=Path, help="Override the application run-report root.")
+    parser.add_argument(
+        "--report-dir",
+        type=Path,
+        help="Override the run-report root for status and non-dry-run commands.",
+    )
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument("-q", "--quiet", action="store_true")
     verbosity.add_argument("-v", "--verbose", action="store_true")
@@ -124,22 +150,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common(status)
 
-    pull = commands.add_parser("pull", help="Plan or apply Excel-to-Markdown changes.")
-    _add_common(pull)
-    pull.add_argument(
-        "--write-notes",
-        action="store_true",
-        help="Apply planned proxy-note writes. The default only reports.",
+    pull = commands.add_parser(
+        "pull",
+        help="Apply Excel-to-Markdown changes; use --dry-run to preview.",
+        description=(
+            "Apply Excel-to-Markdown changes. Normal execution writes proxy notes and "
+            "synchronization state; use --dry-run for a read-only preview."
+        ),
     )
+    _add_common(pull)
+    _add_execution_mode(pull, legacy_write_option="--write-notes")
     _add_preference(pull)
 
-    push = commands.add_parser("push", help="Plan or apply Markdown-to-Excel changes.")
-    _add_common(push)
-    push.add_argument(
-        "--write-excel",
-        action="store_true",
-        help="Back up and update workbooks. The default only reports.",
+    push = commands.add_parser(
+        "push",
+        help="Apply Markdown-to-Excel changes; use --dry-run to preview.",
+        description=(
+            "Apply Markdown-to-Excel changes. Normal execution backs up and updates "
+            "workbooks and synchronization state; use --dry-run for a read-only preview."
+        ),
     )
+    _add_common(push)
+    _add_execution_mode(push, legacy_write_option="--write-excel")
     push.add_argument(
         "--allow-rename",
         action="store_true",
@@ -153,13 +185,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_preference(push)
 
-    adopt = commands.add_parser("adopt", help="Plan or assign stable workbook custom IDs.")
-    _add_common(adopt)
-    adopt.add_argument(
-        "--write-excel",
-        action="store_true",
-        help="Back up workbooks and add missing TknExcelCatalogId values.",
+    adopt = commands.add_parser(
+        "adopt",
+        help="Assign stable workbook custom IDs; use --dry-run to preview.",
+        description=(
+            "Assign missing stable workbook custom IDs. Normal execution backs up and "
+            "updates workbooks; use --dry-run for a read-only preview."
+        ),
     )
+    _add_common(adopt)
+    _add_execution_mode(adopt, legacy_write_option="--write-excel")
     return parser
 
 
@@ -292,10 +327,40 @@ def _log_readable_summary(logger: logging.Logger, summary: dict[str, Any]) -> No
         [
             f"  report: {report_path or '-'}",
             f"  summary JSON: {summary_path}",
-            f"  differences CSV: {summary.get('differencesPath', '-')}",
+            f"  differences CSV: {summary.get('differencesPath') or '-'}",
         ]
     )
     logger.info("Summary:\n%s", "\n".join(lines))
+
+
+def _log_adopt_action(logger: logging.Logger, action: Action) -> None:
+    if action.status == "unchanged":
+        return
+    if action.status == "adopted":
+        level = SUCCESS
+    elif action.status.endswith("error"):
+        level = logging.ERROR
+    elif action.conflict_fields or action.status == "duplicate-id":
+        level = logging.WARNING
+    else:
+        level = logging.INFO
+    fields = [f"sourcePath={_one_line(action.source_path)}"]
+    if action.workbook_id:
+        fields.append(f"workbookId={_one_line(action.workbook_id)}")
+    if action.message:
+        fields.append(f"message={_one_line(action.message)}")
+    logger.log(level, "[%s] %s", action.status, " | ".join(fields))
+
+
+def _log_legacy_write_warning(logger: logging.Logger, args: argparse.Namespace) -> None:
+    if getattr(args, "legacy_write", False):
+        option = "--write-notes" if args.command == "pull" else "--write-excel"
+        logger.warning(
+            "%s is deprecated and no longer required; normal %s execution writes. "
+            "Use --dry-run for a read-only preview.",
+            option,
+            args.command,
+        )
 
 
 def _display_difference_value(value: str) -> str:
@@ -434,61 +499,78 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.command == "push":
             _log_source_configuration(logger, sources)
+        if args.command in {"pull", "push", "adopt"}:
+            _log_legacy_write_warning(logger, args)
         backup_dir: Path | None = None
         if args.command == "status":
             actions = run_status(config, sources)
             write_enabled = False
         elif args.command == "pull":
+            write_enabled = not args.dry_run
             actions = run_pull(
                 config,
                 sources,
-                write_notes=args.write_notes,
+                write_notes=write_enabled,
                 preference=_preference(args),
             )
             for action in actions:
                 _log_pull_action(logger, action)
-            write_enabled = bool(args.write_notes)
         elif args.command == "push":
-            if args.allow_rename and not args.write_excel:
-                raise ConfigError("--allow-rename requires --write-excel")
+            write_enabled = not args.dry_run
             actions, backup_dir = run_push(
                 config,
                 sources,
-                write_excel=args.write_excel,
+                write_excel=write_enabled,
                 allow_rename=args.allow_rename,
                 preference=_preference(args),
                 note_filters=tuple(args.note),
                 on_action=lambda action: _log_push_action(logger, action),
             )
-            write_enabled = bool(args.write_excel)
         elif args.command == "adopt":
+            write_enabled = not args.dry_run
             actions, backup_dir = run_adopt(
                 config,
                 sources,
-                write_excel=args.write_excel,
+                write_excel=write_enabled,
             )
-            write_enabled = bool(args.write_excel)
+            for action in actions:
+                _log_adopt_action(logger, action)
         else:
             raise AssertionError(args.command)
         extra = {"backupPath": str(backup_dir) if backup_dir else ""}
-        summary, _ = write_report(
-            args.command,
-            actions,
-            write_enabled=write_enabled,
-            report_root=report_root,
-            extra=extra,
-        )
+        if args.command in {"pull", "push", "adopt"} and args.dry_run:
+            summary = summarize_actions(
+                args.command,
+                actions,
+                write_enabled=False,
+                extra=extra,
+            )
+            if report_root is not None:
+                logger.warning("--report-dir has no effect in dry-run mode; no report was written.")
+        else:
+            summary, _ = write_report(
+                args.command,
+                actions,
+                write_enabled=write_enabled,
+                report_root=report_root,
+                extra=extra,
+            )
         if args.verbose:
             _log_action_differences(logger, actions)
         if args.command == "status":
             _log_status_results(logger, actions, sources)
+        result_suffix = (
+            "no persistent report was written"
+            if args.command in {"pull", "push", "adopt"} and args.dry_run
+            else f"report: {summary['reportPath']}"
+        )
         if summary["status"] == "success":
-            logger.log(SUCCESS, "%s completed; report: %s", args.command, summary["reportPath"])
+            logger.log(SUCCESS, "%s completed; %s", args.command, result_suffix)
         elif summary["status"] == "conflict":
-            logger.warning("%s found conflicts; report: %s", args.command, summary["reportPath"])
+            logger.warning("%s found conflicts; %s", args.command, result_suffix)
         else:
             logger.error(
-                "%s failed for one or more targets; report: %s", args.command, summary["reportPath"]
+                "%s failed for one or more targets; %s", args.command, result_suffix
             )
         if args.command in {"pull", "push", "adopt"}:
             _log_readable_summary(logger, summary)

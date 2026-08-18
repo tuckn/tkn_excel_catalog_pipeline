@@ -7,8 +7,8 @@
 Markdownを検索用catalog entry兼metadata編集面として使います。
 ExcelからMarkdownへの反映は`pull`、MarkdownからExcelへの反映は`push`です。
 前回両者が一致した同期stateを基準に変更方向とconflictを判定します。
-変更を伴う処理はすべて、既定ではreportだけを作るdry-runであり、
-workbookや代理ノートを自動削除しません。
+通常の`pull`、`push`、`adopt`は、command名が表す変更を実行します。
+read-only previewには`--dry-run`を明示します。workbookや代理ノートを自動削除しません。
 
 ## 必要環境
 
@@ -35,6 +35,12 @@ tkn-excel-catalog --help
 tool環境へ格納され、repository内の変更は自動反映されません。最後のcommandは、
 install後にCLI entry pointが動作することを確認します。現在の設定は
 `tkn-excel-catalog config show`、versionは`tkn-excel-catalog --version`で確認できます。
+
+version `0.2.0`で実行境界が変わります。optionなしの`pull`、`push`、`adopt`は
+書き込みを行い、`--dry-run`だけがpreview modeです。再install前に、`0.1.x`の
+optionなしdry-runへ依存しているTask Scheduler、shell script、保存済み手順を更新して
+ください。旧`--write-notes`と`--write-excel`は`0.2.x`の互換期間中も受け付け、通常実行と
+同じ書き込みを行いますが、deprecation warningを表示します。
 
 `git pull`などでrepositoryを更新した後は、次のcommandで再インストールします。
 
@@ -84,12 +90,12 @@ tkn-excel-catalog config init
 | `sources[].notes.root` | 代理noteのfolderです。`pull`の出力先であり、`push`の入力元です。 |
 | `sources[].notes.profile` | note形式のprofileです。現versionでは`tkn-obsidian-v1`のまま使用します。 |
 | `sources[].notes.frontmatter_term_format` | `keywords`と`categories`の形式です。既定の`obsidian-link`は`[[term]]`、`plain`は通常文字列で出力します。 |
-| `sources[].notes.rename_adapter` | rename・folder移動の処理方法です。既定の`report-only`はfileを変更せず、`filesystem`は後述の明示的なwrite optionと組み合わせて直接変更します。 |
+| `sources[].notes.rename_adapter` | rename・folder移動の処理方法です。既定の`report-only`はpathを変更せず、`filesystem`は後述の通常実行で直接変更を許可します。 |
 | `sync.max_extracted_text_chars` | 代理noteへ保存するworkbook抽出textの最大文字数です。 |
 
 その他の`sync`の真偽値は、将来の拡張に備えた安全方針です。現versionは未知のnote
 metadataを常に保持し、fileを削除しません。workbook renameの適用には、設定とは別に
-`push --write-excel --allow-rename`も必要です。
+`push --allow-rename`も必要です。
 
 Windows pathはYAMLのsingle quoteで囲む方法を推奨します。例:
 `'C:\path\to\excel-workbooks'`。single quote内ではbackslashを`\\`へ二重化する必要は
@@ -136,16 +142,18 @@ sources:
       rename_adapter: filesystem
 ```
 
-`recursive: true`では、source rootからの相対folderを代理note側にも再現します。例えば`2008/所有してきたCPUのベンチマーク比較.xlsx`は、notes rootの`2008/所有してきたCPUのベンチマーク比較.xlsx.md`となり、Frontmatterは`sourceFileName: 2008/所有してきたCPUのベンチマーク比較.xlsx`になります。既存workbookを年folderへ移動した後は、まず`pull`で予定を確認し、review後に`pull --write-notes`を実行してください。追跡済み代理noteのfolder移動を直接適用するには`rename_adapter: filesystem`が必要です。
+`recursive: true`では、source rootからの相対folderを代理note側にも再現します。例えば`2008/所有してきたCPUのベンチマーク比較.xlsx`は、notes rootの`2008/所有してきたCPUのベンチマーク比較.xlsx.md`となり、Frontmatterは`sourceFileName: 2008/所有してきたCPUのベンチマーク比較.xlsx`になります。既存workbookを年folderへ移動した後は、まず`pull --dry-run`で予定を確認し、review後に通常の`pull`を実行してください。追跡済み代理noteのfolder移動を直接適用するには`rename_adapter: filesystem`が必要です。
 
 rename・folder移動の方向、許可option、Obsidian backlinkの注意点は、
 「仕様」の「rename・folder移動」を参照してください。
 
 ## 基本操作
 
-変更を伴うcommandは、まずwrite optionなしのdry-runで実行します。
-consoleのsummaryとreport folderをreviewし、意図した内容であることを確認してから、
-同じcommandに明示的なwrite optionを付けて適用します。
+optionなしの`pull`、`push`、`adopt`は、command名が表す変更を実行します。
+先にread-only previewが必要な場合は`--dry-run`を付けます。dry-runは通常実行と同じ設定解決、
+入力validation、三方向比較、競合確認、path確認、保護条件を実行しますが、workbook、代理note、
+同期state、cache、backup、run reportを書きません。どちらのmodeもnetwork access、認証、
+外部service、生成AIを使用しません。
 
 ### 状態を確認する
 
@@ -158,36 +166,37 @@ tkn-excel-catalog status
 
 ### ExcelからMarkdownへ反映する
 
-ExcelからMarkdownへの変更を確認し、review後に適用:
+ExcelからMarkdownへ反映、または同じ判定を変更なしでpreview:
 
 ```console
 tkn-excel-catalog pull
-tkn-excel-catalog pull --write-notes
+tkn-excel-catalog pull --dry-run
 ```
 
 通常の`pull`は、Markdownだけで編集されたように見えるmetadataを上書きせず保持します。
 過去の誤った同期stateからの復旧など、Excelをすべての差分fieldの正とする場合は、
-dry-run reportを確認してから`--prefer-source`を明示します。
+dry-runのconsole出力を確認してから`--prefer-source`を明示します。
 
 ```console
 tkn-excel-catalog pull --source example --prefer-source
-tkn-excel-catalog pull --source example --prefer-source --write-notes
+tkn-excel-catalog pull --source example --prefer-source --dry-run
 ```
 
 subcommandの前にglobal option `-v`を付けると、metadataの比較値をfield単位で表示します。
-同じ完全な値は、workbookの1 fieldを1行とする`differences.csv`にも保存します。
+通常実行では同じ完全な値を、workbookの1 fieldを1行とする`differences.csv`にも保存します。
+dry-runではconsoleだけに表示します。
 
 ```console
-tkn-excel-catalog -v pull --source example --prefer-source
+tkn-excel-catalog -v pull --source example --prefer-source --dry-run
 ```
 
 ### MarkdownからExcelへ反映する
 
-MarkdownからExcelへの変更を確認し、review後にbackup付きで適用:
+MarkdownからExcelへbackup付きで反映、または変更なしでpreview:
 
 ```console
 tkn-excel-catalog push
-tkn-excel-catalog push --write-excel
+tkn-excel-catalog push --dry-run
 ```
 
 各statusの意味と終了codeは、「仕様」の「console出力、status、終了code」を
@@ -199,16 +208,16 @@ tkn-excel-catalog push --write-excel
 
 ```console
 tkn-excel-catalog push --note example.xlsx.md
-tkn-excel-catalog push --note example.xlsx.md --write-excel
+tkn-excel-catalog push --note example.xlsx.md --dry-run
 ```
 
 ### workbook IDを付与する
 
-stable workbook IDの不足を確認し、明示的にcustom propertyへ付与:
+stable workbook IDをcustom propertyへ付与します。dry-runでは付与対象だけを表示します:
 
 ```console
 tkn-excel-catalog adopt
-tkn-excel-catalog adopt --write-excel
+tkn-excel-catalog adopt --dry-run
 ```
 
 ## 仕様
@@ -237,10 +246,10 @@ flowchart LR
 例えば、前回一致したtitleだけをExcel側で変更した場合は`pull`、
 Markdown側だけで変更した場合は`push`の対象です。両方が前回値から
 別々の値へ変わった場合は`conflict`とし、勝手に上書きしません。
-明示的なwrite後は、ExcelとMarkdownが実際に一致したfieldだけを新しい
+通常実行後は、ExcelとMarkdownが実際に一致したfieldだけを新しい
 baseとして`sync-state.json`へ記録します。dry-runはこのstateを更新しません。
-runごとの`summary.json`や`differences.csv`は判定のreview用reportであり、
-上記の継続的な同期stateとは別です。
+runごとの`summary.json`や`differences.csv`は実行reportであり、上記の継続的な
+同期stateとは別です。dry-runはこれらのreportも作成しません。
 
 ### metadata契約
 
@@ -269,10 +278,10 @@ scalarとし、`schemaVersion`はquote付き文字列のまま保持します。
 代理ノート名は`<workbook-name>.xlsx.md`または`<workbook-name>.xlsm.md`です。再帰探索時はsourceの相対folder構造をnotes root配下に再現します。生成管理する
 本文sectionは`excel-catalog` markerで囲みます。未知のFrontmatter fieldとmarker外の
 手書き本文は保持します。workbook core metadataとstable custom IDはFrontmatterに置くため、
-schema 2.0では`## Excel Metadata`を生成せず、明示的なnote書込み時に旧managed sectionを
+schema 2.0では`## Excel Metadata`を生成せず、通常のnote書込み時に旧managed sectionを
 削除します。
 `schemaVersion`がない、またはschema 1.0の`noun` / `nouns`を使うlegacy代理noteも
-引き続き読めます。review後の明示的なnote書込みで現profileのversionを追加し、dry-runでは
+引き続き読めます。通常のnote書込みで現profileのversionを追加し、dry-runでは
 noteを変更しません。
 
 生成Frontmatter契約と本文構造（`schemaVersion`、見出し、section順、default description）は、application-owned profile
@@ -302,19 +311,19 @@ rename・folder移動は、変更した場所によって次の2方向があり�
 
 `rename_adapter`は、この要求をfilesystem上で直接処理してよいかをsource単位で指定します。
 
-- `report-only`: 既定値です。rename・folder移動が必要でもfileを変更せず、actionを`rename-required`としてrun reportへ記録します。
+- `report-only`: 既定値です。rename・folder移動が必要でもpathを変更せず、actionを`rename-required`としてconsoleへ表示し、dry-run以外ではrun reportにも記録します。
 - `filesystem`: backlink更新を伴わない通常のfilesystem操作で、workbookまたは代理noteを直接rename・移動できるようにします。
 
-`filesystem`を設定しただけではfileは変更されません。実際の変更には、方向に応じて次のwrite optionも必要です。
+`filesystem`を設定しただけではfileは変更されません。対応する通常commandの実行が必要です。
 
 | 方向 | 必要な設定とcommand |
 | --- | --- |
-| workbookを先にrename・移動し、代理noteを追従させる | `rename_adapter: filesystem`と`pull --write-notes` |
-| `sourceFileName`を編集し、workbookと代理noteをrename・移動する | `rename_adapter: filesystem`と`push --write-excel --allow-rename` |
+| workbookを先にrename・移動し、代理noteを追従させる | `rename_adapter: filesystem`と通常の`pull` |
+| `sourceFileName`を編集し、workbookと代理noteをrename・移動する | `rename_adapter: filesystem`と通常の`push --allow-rename` |
 
-optionなしの`pull`と`push`はdry-runです。`sync.allow_source_rename`は現versionのrename許可判定には使用されないため、上記の`rename_adapter`とcommand optionを使用してください。
+同じ操作をfile移動なしで検証・previewするには`--dry-run`を付けます。push側のrename previewでも`--allow-rename`を残すことで、通常実行と同じrename先validationを行います。`sync.allow_source_rename`は現versionのrename許可判定には使用されないため、上記の`rename_adapter`とcommand optionを使用してください。
 
-`rename-required`の対象、現在のsource path・note path、理由は`~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv`と`details.json`へ記録されます。`pull`で代理noteの移動が必要な場合は、希望するnote pathと衝突情報も`details.json`に入ります。`push`側の希望する相対pathは編集したFrontmatter `sourceFileName`で確認します。command終了時にreport folderがconsoleへ表示され、`push`ではfile単位の`rename-required`もstderrへ表示されます。
+`rename-required`の対象、現在のsource path・note path、理由はstderrへ表示します。通常実行では`~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/actions.csv`と`details.json`にも記録します。`pull`で代理noteの移動が必要な場合は、希望するnote pathと衝突情報も`details.json`に入ります。`push`側の希望する相対pathは編集したFrontmatter `sourceFileName`で確認します。dry-runはreportを作成しないため、field単位のpreviewが必要な場合は`-v`を使います。
 
 rename先はsource root内に収まり、現在と同じ拡張子で、Windows上有効かつ衝突しない相対pathである必要があります。
 `filesystem`はMarkdown fileを直接移動し、Obsidian backlinkを更新しません。そのため既定値は`report-only`です。backlink更新が必要なVaultではreportを確認し、Obsidian上で手動renameするか、対応する外部adapterが追加されるまで`report-only`を使用してください。
@@ -332,7 +341,13 @@ run report:
 ```
 
 base stateは`~/.tkn/excel_catalog_pipeline/state/sync-state.json`、backupは隣接する
-`backups/`です。dry-runはreportを作成しますが、workbook、note、state、cacheを変更しません。
+`backups/`です。通常の`pull`、`push`、`adopt`はrun reportを作成します。dry-runは、
+workbook、note、同期state、cache、backup、reportを含むapplicationの永続fileを作成、
+更新、削除しません。正確なpreviewに必要な設定local fileと既存stateは読み取ります。
+network access、認証、download、外部service、課金処理は使用せず、applicationの一時fileも
+残しません。previewはその時点のsnapshotであり、後の通常実行との完全一致は保証しません。
+通常実行は入力を読み直し、各変更の直前にconflict、collision、signature、lockなどの
+保護条件を再確認します。
 file別reportでは、`sourceToNoteFields`が`pull`でworkbookから代理noteへ反映するfield、
 `noteToSourceFields`が`push`で代理noteからworkbookへ反映するfieldを示します。
 `changedFields`は、そのreportを作成したcommandが反映または反映予定としたfieldです。
@@ -364,11 +379,12 @@ Windows用の補佐scriptはdesktop版Excelを使い、旧`.xls` workbookをcata
 変換します。元fileは残し、既存の変換先を上書きしません。VBAを含むworkbookは`.xlsm`、
 それ以外は`.xlsx`として保存します。desktop版Excelが必要なのは、この変換scriptだけです。
 
-まずdry-runで予定を確認し、次に明示的なwrite switchを付けて実行します。
+通常実行は対象workbookを変換します。出力folderやworkbookを作らずに予定を検証する場合は
+`-DryRun`を付けます。
 
 ```console
 .\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks"
-.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks" -Write
+.\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks" -DryRun
 ```
 
 `-SourcePath`は、変換元の`.xls`があるfolderを指定する引数であり、出力先の指定では
@@ -378,18 +394,23 @@ Windows用の補佐scriptはdesktop版Excelを使い、旧`.xls` workbookをcata
 `-Recurse`を指定します。明示した出力先は単一folderとなるため、同名の変換先は
 collisionとして報告し、書き込みません。進捗はstderr、最後のcompact JSON resultは
 集計だけを含む短い1件としてstdoutへ出力します。拡張子が厳密に`.xls`のfileだけを
-検査し、既存の`.xlsx`と`.xlsm`は対象外とします。
+検査し、既存の`.xlsx`と`.xlsm`は対象外とします。どちらのmodeもdesktop版Excelを起動し、
+VBAと出力形式の判定のためsourceをread-onlyで開きます。macro、event、link更新、alertは
+無効のままです。旧`-Write`は`0.2.x`の互換期間中、通常実行のdeprecated no-opとして
+受け付けます。
 
 ### console出力、status、終了code
 
 人向け進捗はstderrへ`[LEVEL] message`として出します。pull、push、adoptの最後には、
-status件数とreport pathをindent付きsummaryで表示します。`pull`では、`unchanged`以外の
+status件数をindent付きsummaryで表示します。通常実行はreport pathを含み、dry-runは
+永続reportを作成しなかったことを明示します。`pull`では、`unchanged`以外の
 代理noteごとに、絶対pathの`notePath`と相対`sourcePath`を表示します。`push`では、処理対象のsource ID、
 workbook path、include pattern、notes設定を最初に表示します。その後、`unchanged`以外の
 fileごとの結果を確定するたびに、noteのfile nameと相対`sourcePath`を表示し、最後に
 indent付きのsummaryを表示します。`unchanged`は個別表示せず、最終summaryに総数だけを表示します。
-同期commandはstdoutの末尾にraw JSONを追加しません。最終summaryには`summary.json`の絶対pathを
-表示し、`details.json`とCSVのreview artifactも、表示されたreport folderへ従来どおり保存します。`config show`は解決済み設定を
+同期commandはstdoutの末尾にraw JSONを追加しません。通常実行の最終summaryには`summary.json`の
+絶対pathを表示し、`details.json`とCSV artifactも、表示されたreport folderへ保存します。
+dry-runは予定件数、対象、path、理由、conflictをstderrへ表示し、artifactを作成しません。`config show`は解決済み設定を
 JSONとして引き続き表示します。`-v` / `--verbose`では、fieldごとのExcel値、
 Markdown値、base値、適用方向も表示します。`--quiet`、`--verbose`、`--no-color`を提供し、
 `NO_COLOR`も尊重します。

@@ -633,7 +633,7 @@ def run_push(
                         source_path=workbook.relative_path,
                         note_path=str(note.path),
                         changed_fields=["sourceFileName"],
-                        message="Pass --allow-rename together with --write-excel after review.",
+                        message="Pass --allow-rename after review.",
                     )
                 )
                 continue

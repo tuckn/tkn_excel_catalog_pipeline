@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
+import pytest
+
 import excel_catalog_pipeline.cli as cli_module
 import excel_catalog_pipeline.config as config_module
+import excel_catalog_pipeline.pipeline as pipeline_module
 from excel_catalog_pipeline.cli import main
 from excel_catalog_pipeline.models import Action
 
@@ -14,6 +16,21 @@ from .helpers import create_workbook
 
 def test_cli_uses_tkn_prefixed_program_name() -> None:
     assert cli_module.build_parser().prog == "tkn-excel-catalog"
+
+
+def test_mutating_command_help_explains_normal_write_and_dry_run(capsys) -> None:  # type: ignore[no-untyped-def]
+    with pytest.raises(SystemExit) as exc_info:
+        main(["pull", "--help"])
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "Normal execution writes proxy notes" in captured.out
+    assert "--dry-run" in captured.out
+    assert "Preview and validate planned changes without writing" in captured.out
+    assert "workbooks, notes, state, cache, reports" in captured.out
+    assert "or external" in captured.out
+    assert "systems. This CLI uses no network" in captured.out
+    assert "--write-notes" in captured.out
+    assert "Deprecated compatibility option" in captured.out
 
 
 def test_config_show_outputs_one_json_document(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -46,7 +63,9 @@ def test_config_init_creates_user_config(monkeypatch, tmp_path: Path, capsys) ->
     assert payload["status"] == "unchanged"
 
 
-def test_cli_pull_dry_run_writes_report_not_note(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+def test_cli_pull_without_option_writes_note_state_and_report(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
     workbooks = tmp_path / "workbooks"
     notes = tmp_path / "notes"
     create_workbook(workbooks / "book.xlsx")
@@ -62,20 +81,70 @@ sources:
 ''',
         encoding="utf-8",
     )
+    monkeypatch.setattr(pipeline_module, "state_path", lambda: tmp_path / "state.json")
     result = main(["--config", str(config), "--report-dir", str(tmp_path / "reports"), "pull"])
     captured = capsys.readouterr()
     summary_path = next((tmp_path / "reports").glob("*-pull/summary.json"))
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert result == 0
     assert captured.out == ""
-    assert f"[INFO] [would-create] notePath={notes / 'book.xlsx.md'}" in captured.err
+    assert f"[SUCCESS] [created] notePath={notes / 'book.xlsx.md'}" in captured.err
     assert "sourcePath=book.xlsx" in captured.err
-    assert payload["statusCounts"] == {"would-create": 1}
+    assert "  mode: write" in captured.err
+    assert payload["statusCounts"] == {"created": 1}
     assert Path(payload["reportPath"], "summary.json").exists()
     details = json.loads(Path(payload["reportPath"], "details.json").read_text(encoding="utf-8"))
     assert details[0]["sourceToNoteFields"] == []
     assert details[0]["noteToSourceFields"] == []
+    assert (notes / "book.xlsx.md").exists()
+
+
+def test_cli_pull_dry_run_changes_no_persistent_files(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    workbooks = tmp_path / "workbooks"
+    notes = tmp_path / "notes"
+    reports = tmp_path / "reports"
+    create_workbook(workbooks / "book.xlsx")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f'''schema_version: 1
+sources:
+  - id: example
+    path: "{workbooks.as_posix()}"
+    include: ["**/*.xlsx"]
+    notes:
+      root: "{notes.as_posix()}"
+''',
+        encoding="utf-8",
+    )
+    state = tmp_path / "state.json"
+    monkeypatch.setattr(pipeline_module, "state_path", lambda: state)
+
+    result = main(
+        [
+            "--config",
+            str(config),
+            "--report-dir",
+            str(reports),
+            "pull",
+            "--dry-run",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert captured.out == ""
+    assert f"[INFO] [would-create] notePath={notes / 'book.xlsx.md'}" in captured.err
+    assert "  mode: dry-run" in captured.err
+    assert "  report: -" in captured.err
+    assert "  summary JSON: -" in captured.err
+    assert "  differences CSV: -" in captured.err
+    assert "no persistent report was written" in captured.err
+    assert "--report-dir has no effect in dry-run mode" in captured.err
     assert not notes.exists()
+    assert not reports.exists()
+    assert not state.exists()
 
 
 def test_cli_status_logs_grouped_counts_and_attention_items(
@@ -173,6 +242,7 @@ sources:
     )
 
     def fake_run_push(*args, on_action, **kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["write_excel"] is True
         actions = [
             Action(status="written", source_root_id="example", source_path="one.xlsx"),
             Action(status="unchanged", source_root_id="example", source_path="two.xlsx"),
@@ -208,7 +278,6 @@ sources:
             "--report-dir",
             str(tmp_path / "reports"),
             "push",
-            "--write-excel",
         ]
     )
     captured = capsys.readouterr()
@@ -250,7 +319,7 @@ sources:
     assert payload["statusCounts"]["unchanged"] == 1
 
 
-def test_cli_pull_verbose_logs_values_and_writes_difference_csv(
+def test_cli_pull_verbose_dry_run_logs_values_without_report(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:  # type: ignore[no-untyped-def]
     config = tmp_path / "config.yaml"
@@ -267,6 +336,7 @@ sources:
     )
 
     def fake_run_pull(*args, **kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["write_notes"] is False
         return [
             Action(
                 status="would-update",
@@ -298,6 +368,7 @@ sources:
             "--report-dir",
             str(tmp_path / "reports"),
             "pull",
+            "--dry-run",
             "--prefer-source",
         ]
     )
@@ -318,25 +389,115 @@ sources:
     assert "[INFO] Summary:\n  command: pull\n  mode: dry-run" in captured.err
     assert "    would-update: 1\n    unchanged: 1" in captured.err
 
-    summary_path = next((tmp_path / "reports").glob("*-pull/summary.json"))
-    assert f"  summary JSON: {summary_path}" in captured.err
-    payload = json.loads(summary_path.read_text(encoding="utf-8"))
-    differences_path = Path(payload["differencesPath"])
-    assert differences_path.exists()
-    with differences_path.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    assert rows == [
-        {
-            "status": "would-update",
-            "sourceRoot": "example",
-            "sourcePath": "nested/book.xlsx",
-            "notePath": str(tmp_path / "notes" / "nested" / "book.xlsx.md"),
-            "workbookId": "",
-            "field": "author",
-            "direction": "push",
-            "plannedDirection": "source-to-note",
-            "baseValue": "Example author",
-            "excelValue": "Example author",
-            "noteValue": "",
-        }
-    ]
+    assert "  summary JSON: -" in captured.err
+    assert "  differences CSV: -" in captured.err
+    assert not (tmp_path / "reports").exists()
+
+
+def test_legacy_write_option_is_accepted_with_deprecation_warning(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "schema_version: 1\nsources:\n"
+        f"  - id: example\n    path: '{tmp_path.as_posix()}'\n"
+        f"    notes:\n      root: '{(tmp_path / 'notes').as_posix()}'\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_pull(*args, **kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["write_notes"] is True
+        return []
+
+    monkeypatch.setattr(cli_module, "run_pull", fake_run_pull)
+    result = main(
+        [
+            "--config",
+            str(config),
+            "--report-dir",
+            str(tmp_path / "reports"),
+            "pull",
+            "--write-notes",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "--write-notes is deprecated and no longer required" in captured.err
+
+
+def test_cli_push_dry_run_validates_allowed_rename_without_report(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "schema_version: 1\nsources:\n"
+        f"  - id: example\n    path: '{tmp_path.as_posix()}'\n"
+        f"    notes:\n      root: '{(tmp_path / 'notes').as_posix()}'\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_push(*args, on_action, **kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["write_excel"] is False
+        assert kwargs["allow_rename"] is True
+        action = Action(
+            status="would-write",
+            source_root_id="example",
+            source_path="old.xlsx",
+            changed_fields=["sourceFileName"],
+        )
+        on_action(action)
+        return [action], None
+
+    monkeypatch.setattr(cli_module, "run_push", fake_run_push)
+    result = main(
+        [
+            "--config",
+            str(config),
+            "--report-dir",
+            str(tmp_path / "reports"),
+            "push",
+            "--dry-run",
+            "--allow-rename",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "[INFO] [would-write] fileName=old.xlsx | sourcePath=old.xlsx" in captured.err
+    assert "  mode: dry-run" in captured.err
+    assert not (tmp_path / "reports").exists()
+
+
+def test_cli_adopt_dry_run_lists_targets_without_report(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "schema_version: 1\nsources:\n"
+        f"  - id: example\n    path: '{tmp_path.as_posix()}'\n"
+        f"    notes:\n      root: '{(tmp_path / 'notes').as_posix()}'\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_adopt(*args, **kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["write_excel"] is False
+        return [Action(status="would-adopt", source_root_id="example", source_path="book.xlsx")], None
+
+    monkeypatch.setattr(cli_module, "run_adopt", fake_run_adopt)
+    result = main(
+        [
+            "--config",
+            str(config),
+            "--report-dir",
+            str(tmp_path / "reports"),
+            "adopt",
+            "--dry-run",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "[INFO] [would-adopt] sourcePath=book.xlsx" in captured.err
+    assert "    would-adopt: 1" in captured.err
+    assert not (tmp_path / "reports").exists()

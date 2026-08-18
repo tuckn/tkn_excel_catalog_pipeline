@@ -18,23 +18,13 @@ def new_run_id(command: str) -> str:
     return f"{stamp}-{command}"
 
 
-def write_report(
+def summarize_actions(
     command: str,
     actions: list[Action],
     *,
     write_enabled: bool,
-    report_root: Path | None = None,
     extra: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], Path]:
-    run_id = new_run_id(command)
-    run_dir = (report_root or runs_root()) / run_id
-    suffix = 1
-    while run_dir.exists():
-        run_dir = (report_root or runs_root()) / f"{run_id}-{suffix}"
-        suffix += 1
-    run_dir.mkdir(parents=True, exist_ok=False)
-    rows = [action.as_dict() for action in actions]
-    differences_path = run_dir / "differences.csv"
+) -> dict[str, Any]:
     counts = dict(Counter(action.status for action in actions))
     conflicts = sum(bool(action.conflict_fields) for action in actions)
     errors = sum(action.status.endswith("error") for action in actions)
@@ -59,11 +49,39 @@ def write_report(
         "errors": errors,
         "writeEnabled": write_enabled,
         "statusCounts": counts,
-        "reportPath": str(run_dir),
-        "differencesPath": str(differences_path),
+        "reportPath": "",
+        "differencesPath": "",
     }
     if extra:
         summary.update(extra)
+    return summary
+
+
+def write_report(
+    command: str,
+    actions: list[Action],
+    *,
+    write_enabled: bool,
+    report_root: Path | None = None,
+    extra: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], Path]:
+    run_id = new_run_id(command)
+    run_dir = (report_root or runs_root()) / run_id
+    suffix = 1
+    while run_dir.exists():
+        run_dir = (report_root or runs_root()) / f"{run_id}-{suffix}"
+        suffix += 1
+    run_dir.mkdir(parents=True, exist_ok=False)
+    rows = [action.as_dict() for action in actions]
+    differences_path = run_dir / "differences.csv"
+    summary = summarize_actions(
+        command,
+        actions,
+        write_enabled=write_enabled,
+        extra=extra,
+    )
+    summary["reportPath"] = str(run_dir)
+    summary["differencesPath"] = str(differences_path)
     (run_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
