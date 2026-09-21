@@ -117,6 +117,11 @@ tkn-excel-catalog config show
 tkn-excel-catalog --config C:\path\to\config.yaml config show
 ```
 
+先頭行に、読み込んだ設定fileのうち最も優先順位が高いfileのフルパスを表示します。
+続いて、解決済み設定をインデント付きJSONで表示します。`loadedConfigFiles`には
+読み込んだ全fileを適用順で表示します。設定fileがない場合は、組み込み既定値を
+使用していることを先頭行に明示します。出力はテキストの見出しを含む、端末で読むための形式です。
+
 ### サブfolderを読む設定例
 
 source IDは一意である必要があります。schemaは複数rootを表現でき、`--source <id>`で
@@ -411,7 +416,7 @@ indent付きのsummaryを表示します。`unchanged`は個別表示せず、�
 同期commandはstdoutの末尾にraw JSONを追加しません。通常実行の最終summaryには`summary.json`の
 絶対pathを表示し、`details.json`とCSV artifactも、表示されたreport folderへ保存します。
 dry-runは予定件数、対象、path、理由、conflictをstderrへ表示し、artifactを作成しません。`config show`は解決済み設定を
-JSONとして引き続き表示します。`-v` / `--verbose`では、fieldごとのExcel値、
+有効な設定fileのフルパスに続けてインデント付きJSONで表示します。`-v` / `--verbose`では、fieldごとのExcel値、
 Markdown値、base値、適用方向も表示します。`--quiet`、`--verbose`、`--no-color`を提供し、
 `NO_COLOR`も尊重します。
 

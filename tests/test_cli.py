@@ -33,14 +33,21 @@ def test_mutating_command_help_explains_normal_write_and_dry_run(capsys) -> None
     assert "Deprecated compatibility option" in captured.out
 
 
-def test_config_show_outputs_one_json_document(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+def test_config_show_prints_path_before_indented_json(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "user.yaml")
     config = tmp_path / "config.yaml"
     config.write_text("schema_version: 1\nsources: []\n", encoding="utf-8")
-    result = main(["--config", str(config), "config", "show"])
+    result = main(["--config", "config.yaml", "config", "show"])
     captured = capsys.readouterr()
     assert result == 0
-    assert json.loads(captured.out)["command"] == "config show"
-    assert captured.out.count("\n") == 1
+    header, body = captured.out.split("\n\n", 1)
+    assert header == f"Config file: {config.resolve()}"
+    payload = json.loads(body)
+    assert payload["command"] == "config show"
+    assert payload["config"]["loadedConfigFiles"] == [str(config.resolve())]
+    assert '\n  "config": {\n    "schema_version": 1,' in body
+    assert captured.err == ""
 
 
 def test_config_init_creates_user_config(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]

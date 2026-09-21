@@ -122,6 +122,12 @@ tkn-excel-catalog config show
 tkn-excel-catalog --config C:\path\to\config.yaml config show
 ```
 
+The first line shows the full path of the highest-priority loaded config file.
+The resolved configuration follows as indented JSON, with all loaded files listed
+in `loadedConfigFiles` in merge order. If no config file exists, the first line
+states that built-in defaults are used. The output includes a text header and is
+intended for reading in the terminal.
+
 ### Example with subfolder scanning
 
 Source IDs must be unique. The schema supports multiple roots; use `--source <id>` to
@@ -427,7 +433,7 @@ Synchronization commands do not append raw JSON to stdout. After normal executio
 final summary displays the full `summary.json` path, and `details.json` plus the CSV
 artifacts remain available in the displayed report folder. Dry-run displays planned
 counts, targets, paths, reasons, and conflicts on stderr without creating these artifacts. `config show`
-continues to print its resolved configuration as JSON. `-v` / `--verbose` adds per-field Excel,
+prints the active config file's full path followed by indented JSON. `-v` / `--verbose` adds per-field Excel,
 Markdown, base, and planned-direction comparisons. Use `--quiet`, `--verbose`, or
 `--no-color`; `NO_COLOR` is honored.
 
