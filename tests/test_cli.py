@@ -28,7 +28,7 @@ def test_mutating_command_help_explains_normal_write_and_dry_run(capsys) -> None
     assert "Preview and validate planned changes without writing" in captured.out
     assert "workbooks, notes, state, cache, reports" in captured.out
     assert "or external" in captured.out
-    assert "systems. This CLI uses no network" in captured.out
+    assert "synchronization command uses no network" in " ".join(captured.out.split())
     assert "--write-notes" in captured.out
     assert "Deprecated compatibility option" in captured.out
 

@@ -13,6 +13,9 @@ from typing import Any
 
 from . import __version__
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
+from .context import run_context
+from .context_import import import_context
+from .context_source import ContextError
 from .models import Action, SourceConfig
 from .pipeline import run_adopt, run_pull, run_push, run_status
 from .reports import summarize_actions, write_report
@@ -99,7 +102,7 @@ def _add_execution_mode(parser: argparse.ArgumentParser, *, legacy_write_option:
         action="store_true",
         help=(
             "Preview and validate planned changes without writing workbooks, notes, "
-            "state, cache, reports, or external systems. This CLI uses no network, "
+            "state, cache, reports, or external systems. This synchronization command uses no network, "
             "authentication, downloads, external services, or generative AI in either mode."
         ),
     )
@@ -202,6 +205,71 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common(adopt)
     _add_execution_mode(adopt, legacy_write_option="--write-excel")
+    context = commands.add_parser(
+        "context", help="Extract visual sheet context with Codex; never run by pull."
+    )
+    context_commands = context.add_subparsers(dest="context_command", required=True)
+    for name, help_text in (
+        ("sheets", "List saved worksheet names without AI or writes."),
+        ("build", "Render selected sheets and write AI context to the proxy note."),
+    ):
+        command = context_commands.add_parser(name, help=help_text)
+        command.add_argument("--source", required=True, help="Configured source id.")
+        command.add_argument(
+            "--workbook",
+            required=True,
+            help="Workbook path, absolute or relative to the source root.",
+        )
+        if name == "build":
+            selection = command.add_mutually_exclusive_group(required=True)
+            selection.add_argument(
+                "--sheet",
+                action="append",
+                default=[],
+                help="Exact sheet name; repeatable (including hidden sheets).",
+            )
+            selection.add_argument(
+                "--all-sheets",
+                action="store_true",
+                help="Explicitly process all visible worksheets.",
+            )
+            command.add_argument(
+                "--dry-run",
+                action="store_true",
+                help="Validate selection and existing output without rendering, AI calls, or persistent writes.",
+            )
+            command.add_argument(
+                "--force",
+                action="store_true",
+                help="Regenerate even if cached; intentionally replace edits inside selected context blocks.",
+            )
+    importer = context_commands.add_parser(
+        "import", help="Import existing sheet Markdown and images without AI."
+    )
+    importer.add_argument("--source", required=True, help="Configured source id.")
+    importer.add_argument(
+        "--workbook", required=True, help="Workbook path inside the selected source."
+    )
+    importer.add_argument("--sheet", required=True, help="Exact sheet name.")
+    importer.add_argument(
+        "--markdown",
+        required=True,
+        type=Path,
+        help="Existing Markdown with one H1 title and relative image links.",
+    )
+    importer.add_argument(
+        "--description", help="Explicitly replace the proxy Frontmatter description."
+    )
+    importer.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate import and layout migration without persistent writes or AI.",
+    )
+    importer.add_argument(
+        "--force",
+        action="store_true",
+        help="Intentionally replace edited context or restore modified imported images.",
+    )
     return parser
 
 
@@ -496,7 +564,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Config file: {active_path or '(none; using built-in defaults)'}\n")
             print(
                 json.dumps(
-                    {"status": "success", "command": "config show", "config": config_as_dict(config)},
+                    {
+                        "status": "success",
+                        "command": "config show",
+                        "config": config_as_dict(config),
+                    },
                     ensure_ascii=False,
                     indent=2,
                 )
@@ -505,6 +577,37 @@ def main(argv: list[str] | None = None) -> int:
         sources = select_sources(config, args.source)
         if not sources:
             raise ConfigError("No sources are configured")
+        if args.command == "context":
+            if args.report_dir:
+                logger.warning(
+                    "--report-dir does not apply to context; usage records use application state."
+                )
+            if args.context_command == "import":
+                result = import_context(
+                    sources[0],
+                    config.context,
+                    workbook_selector=args.workbook,
+                    sheet_name=args.sheet,
+                    markdown_path=args.markdown,
+                    dry_run=args.dry_run,
+                    force=args.force,
+                    description=args.description,
+                    logger=logger,
+                )
+            else:
+                result = run_context(
+                    sources[0],
+                    config.context,
+                    workbook_selector=args.workbook,
+                    sheet_names=getattr(args, "sheet", []),
+                    all_sheets=getattr(args, "all_sheets", False),
+                    list_only=args.context_command == "sheets",
+                    dry_run=getattr(args, "dry_run", False),
+                    force=getattr(args, "force", False),
+                    logger=logger,
+                )
+            _emit(result)
+            return 1 if result["status"] == "error" else 0
         report_root = args.report_dir.expanduser().resolve() if args.report_dir else None
         logger.info(
             "Running %s for %d configured source(s): %s.",
@@ -584,15 +687,13 @@ def main(argv: list[str] | None = None) -> int:
         elif summary["status"] == "conflict":
             logger.warning("%s found conflicts; %s", args.command, result_suffix)
         else:
-            logger.error(
-                "%s failed for one or more targets; %s", args.command, result_suffix
-            )
+            logger.error("%s failed for one or more targets; %s", args.command, result_suffix)
         if args.command in {"pull", "push", "adopt"}:
             _log_readable_summary(logger, summary)
         return _exit_code(summary)
-    except (ConfigError, StateError) as exc:
+    except (ConfigError, StateError, ContextError) as exc:
         logger.error("%s", exc)
-        if args.command == "config":
+        if args.command in {"config", "context"}:
             _emit({"status": "config-error", "command": args.command, "message": str(exc)})
         return 3
     except Exception as exc:  # pragma: no cover - last-resort CLI boundary
@@ -600,6 +701,6 @@ def main(argv: list[str] | None = None) -> int:
             logger.exception("Unexpected failure")
         else:
             logger.error("Unexpected failure: %s", exc)
-        if args.command == "config":
+        if args.command in {"config", "context"}:
             _emit({"status": "error", "command": args.command, "message": str(exc)})
         return 1

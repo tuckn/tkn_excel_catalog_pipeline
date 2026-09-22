@@ -78,7 +78,7 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
     note_path.write_text(rendered, encoding="utf-8")
     updated = read_note(note_path)
     assert updated.frontmatter["customField"] == "keep-me"
-    assert updated.frontmatter["schemaVersion"] == "2.0"
+    assert updated.frontmatter["schemaVersion"] == "2.1"
     assert updated.frontmatter["description"] == ""
     assert updated.frontmatter["comments"] == "Example description"
     assert list(updated.frontmatter) == [
@@ -94,6 +94,7 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
         "files",
         "sourceRoot",
         "sourceFileName",
+        "sourceFullPath",
         "sourceId",
         "sourceCreated",
         "sourceModified",
@@ -104,8 +105,8 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
     ]
     assert "Handwritten text." in updated.body
     assert "Excel Metadata" not in updated.body
-    assert "<!-- excel-catalog:begin workbook-path -->" in updated.body
-    assert str(workbook_path) in updated.body
+    assert "Workbook Path" not in updated.body
+    assert updated.frontmatter["sourceFullPath"] == str(workbook_path)
     assert render_note(workbook, source, existing=updated, touch_updated=False) == rendered
 
 
@@ -120,7 +121,7 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
     note_path.write_text(rendered, encoding="utf-8")
     note = read_note(note_path)
 
-    assert template.schema_version == "2.0"
+    assert template.schema_version == "2.1"
     assert template.frontmatter_fields == (
         "type",
         "schemaVersion",
@@ -134,6 +135,7 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
         "files",
         "sourceRoot",
         "sourceFileName",
+        "sourceFullPath",
         "sourceId",
         "sourceCreated",
         "sourceModified",
@@ -144,7 +146,6 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
     assert note.frontmatter["schemaVersion"] == template.schema_version
     assert tuple(note.frontmatter) == template.frontmatter_fields
     assert template.managed_names == (
-        "workbook-path",
         "workbook-map",
         "extracted-text",
     )
@@ -156,7 +157,8 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
         line = next(line for line in rendered.splitlines() if line.startswith(f"{field}:"))
         assert "'" not in line
         assert '"' not in line
-    assert "Excel workbookの検索・管理用代理ノート。" in template.text
+    assert "## Overview" not in template.text
+    assert note.frontmatter["sourceFullPath"] == str(workbook_path)
     assert [rendered.index(name) for name in template.managed_names] == sorted(
         rendered.index(name) for name in template.managed_names
     )

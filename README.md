@@ -11,6 +11,9 @@ direction and detect conflicts. Normal `pull`, `push`, and `adopt` execution per
 the changes named by the command; add `--dry-run` for a read-only preview. The tool
 never deletes a workbook or proxy note.
 
+For canvas-style notes, the optional `context build` command renders selected sheets
+and adds AI-generated Markdown context. See “Visual sheet context” below.
+
 ## Requirements
 
 - Windows or another Python 3.11+ platform
@@ -43,7 +46,7 @@ Version `0.2.0` changes the execution boundary: optionless `pull`, `push`, and `
 now write, while `--dry-run` is the only preview mode. Before reinstalling, update any
 Task Scheduler task, shell script, or saved procedure that relied on the `0.1.x`
 optionless dry run. The old `--write-notes` and `--write-excel` options remain accepted
-during the `0.2.x` compatibility period, perform the same normal write, and emit a
+for compatibility, perform the same normal write, and emit a
 deprecation warning.
 
 After `git pull` or another repository update, reinstall the tool:
@@ -267,7 +270,7 @@ Dry-run does not create these reports.
 
 | Markdown proxy note | Excel core property                   |
 | ------------------- | ------------------------------------- |
-| `schemaVersion: "2.0"` | Current proxy-note Frontmatter contract; not workbook metadata |
+| `schemaVersion: "2.1"` | Current proxy-note Frontmatter contract; not workbook metadata |
 | `title`           | Title                                 |
 | `subject`         | Subject                               |
 | `author`          | Author / creator as one string        |
@@ -277,8 +280,10 @@ Dry-run does not create these reports.
 | `sourceCreated`   | Created; source-owned and pull-only   |
 | `sourceModified`  | Modified; source-owned and pull-only  |
 | `sourceFileName`  | Source-root-relative workbook path; editing it requests an explicit rename or move |
+| `sourceFullPath` | Generated absolute workbook path; replaces the body Workbook Path section, not a rename request |
 
-`description` is an optional proxy-note description and is never pushed to Excel. By
+`description` holds the proxy-note overview and is never pushed to Excel. The body
+no longer has an Overview section. By
 default, list values use quoted Obsidian links in Frontmatter. Set
 `sources[].notes.frontmatter_term_format: plain` to write ordinary strings instead. Both
 formats are serialized to Excel as plain terms joined by `; `. Commas remain part of a term. `sourceCreated` and `sourceModified` are
@@ -288,7 +293,8 @@ unquoted YAML scalars. `schemaVersion` remains a quoted string.
 
 Proxy notes are named `<workbook-name>.xlsx.md` or `<workbook-name>.xlsm.md`. Recursive discovery mirrors the source-relative folder structure below the notes root.
 Generated body sections are enclosed by `excel-catalog` markers. Unknown Frontmatter
-fields and text outside those markers are preserved. Workbook core metadata and the stable
+fields and text outside those markers are preserved, except for the explicitly retired
+Overview and Workbook Path sections described below. Workbook core metadata and the stable
 custom ID live in Frontmatter, so schema 2.0 no longer generates `## Excel Metadata` and
 removes the legacy managed section on a normal note write.
 Legacy proxy notes without `schemaVersion`, or with schema 1.0 `noun` / `nouns`, remain
@@ -481,3 +487,176 @@ uv build
 
 Tests use synthetic workbooks only. Do not add private paths, real workbook metadata,
 credentials, or Vault content to fixtures or documentation.
+
+## Visual sheet context (optional)
+
+Version `0.3.0` adds `context build`. It turns an Excel canvas into a structured
+Markdown section, using native Excel rendering plus cell and drawing text. Ordinary
+`pull`, `push`, `adopt`, and `status` do not invoke AI. This is an opt-in operation:
+select a workbook and one or more exact sheet names; there is no automatic bulk build.
+
+Install the optional renderer dependencies (Windows, installed desktop Microsoft
+Excel, and an installed/signed-in Codex CLI are required):
+
+```console
+cd "C:\path\to\tkn_excel_catalog_pipeline"
+uv tool install ".[context]" --reinstall
+tkn-excel-catalog context --help
+```
+
+Create the proxy with `pull` first, then list or select sheets:
+
+```console
+tkn-excel-catalog context sheets --source personal-excel --workbook "example.xlsx"
+tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --dry-run
+tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions"
+tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --sheet "Notes"
+```
+
+`--all-sheets` explicitly selects all visible sheets; hidden sheets require an exact
+`--sheet` selection. Unsupported sheet types fail validation before AI runs. A
+relative workbook path is resolved against the selected source; absolute paths must
+still be inside that source and match its include/ignore rules. All selected sheets
+are validated first and then processed sequentially, stopping at the first failure.
+Successful earlier sheets remain available.
+
+`--dry-run` checks the saved workbook, selection, existing note and cache/edit guards.
+It creates no persistent files and does not start Excel, render, authenticate, or call
+AI. Image count and token cost cannot be known until rendering/generation. `context
+sheets` is also read-only. Context commands emit one compact JSON result on stdout
+and readable progress and usage on stderr (`--quiet` suppresses informational logs).
+
+### Saved-file capture and rendering
+
+The workbook may remain open in Excel. Windows sharing permits reading the **last
+saved file**, including when an ordinary file read is denied. Unsaved edits in the
+Excel UI are not captured. A concurrent save detected during capture is rejected
+with a retry message. A private temporary copy is opened in a separate Excel instance,
+with macros, events and link updates disabled, and is closed without saving.
+The temporary OOXML copy also disables recalculation and refresh-on-open. Excel 4
+macro sheets and non-UTF-8 workbook/connection XML are rejected for rendering. The
+original workbook and the user's Excel session are not modified or closed.
+
+Content bounds include visible cells, merged cells and shapes, including objects
+outside UsedRange or the existing print area. Overlapping tiles preserve detail and
+are ordered top-to-bottom, then left-to-right; the model is instructed to interpret
+regions in Z order. A bounded overview conveys overall placement (its PDF pages may
+be joined). Very widely separated content is represented by detail tiles with
+coordinates rather than an enormous blank overview. Detailed regions must render
+as one page; unexpected pagination stops the build instead of silently omitting it.
+
+The model receives only the selected sheet's images, extracted text and positions.
+The first provider is Codex CLI; its configured model must accept image input.
+The built-in profile uses `gpt-5.6-sol` with `medium` reasoning. This sends selected
+sheet evidence to the signed-in Codex service. There is no automatic provider retry.
+The result is an interpretation: small labels, ambiguous arrow endpoints, unsupported
+embedded objects or unexplained colors can require review. The prompt asks the model
+to state uncertainty and distinguish source statements from inference.
+
+### Output, cache and edit protection
+
+Each selected sheet gets an independent `context-<sheetId>` managed block in the
+existing proxy. Frontmatter and text outside that block are preserved, including
+other sheets' generated sections. Normal `pull` preserves these sections.
+
+Images and structured evidence use this layout, relative to the proxy's directory:
+
+```text
+example.xlsx.md
+img/
+  <book-key>/sheet-<id>/<generation>/
+    001.png
+    002.png
+    evidence.json
+```
+
+The fixed sibling `img` directory keeps links portable when moving the note together
+with its assets. Nested proxy notes get their own sibling `img`. Generated identifiers
+avoid collisions among workbooks and sheets. Old assets are retained; there is no
+automatic deletion. PDFs and the source snapshot are temporary; PNGs and the evidence
+manifest are durable. Do not commit real outputs or usage records to a public repo.
+
+An unchanged sheet, matching configuration/prompt version, intact image files and
+unchanged generated block produce a cache hit: no Excel rendering and no AI tokens.
+The fingerprint covers the sheet's internal OOXML dependencies and shared styles;
+a workbook-wide style change may therefore invalidate multiple sheets. Changes to
+unrelated cell strings normally do not. `--force` explicitly regenerates and replaces
+manual edits **inside selected context blocks**. Without it, modified generated text
+or missing matching state blocks replacement. An edit made while generation is
+running is detected before publication and preserved, even with `--force`.
+
+State and usage records live under `~/.tkn/excel_catalog_pipeline/state/context/`,
+separate from metadata sync state. Builds hold a per-note lock; after an abrupt
+process termination, inspect the process before removing a reported stale lock.
+If an AI call fails, times out, or produces invalid output, the existing note remains
+unchanged. A later publication failure may leave unused assets, which are retained.
+
+### Usage and configuration
+
+Every AI invocation logs its reported input, output, cached input, reasoning tokens
+and duration; the JSON result totals invocations in that run. Cached input is a
+**subset of input**, and reasoning is a **subset of output**. They are not added again.
+Only `turn.completed` usage deltas are summed; cumulative events are ignored.
+Unavailable or interrupted usage is `unknown`/`null`, never an invented zero. Partial
+known counts are retained in the usage JSON. Records contain usage/provenance, not
+prompts, generated bodies, or credentials. Monetary cost is not estimated from tokens:
+billing depends on the account and pricing. A cache hit reports zero calls/tokens.
+
+The packaged example includes the `context` mapping. Existing configuration files
+remain valid. Settings include `executable`, `model`, `reasoning_effort`, `language`,
+`timeout_seconds` (AI invocation), `max_images` (including overview),
+`tile_width_points`, `tile_height_points`, `overlap_points`, `image_dpi`, `max_cells`,
+`max_objects`, `max_input_chars`, and `max_workbook_mb`. Limits fail explicitly instead
+of truncating source content. Increase a relevant limit deliberately after inspection.
+The image directory is intentionally fixed; no extra path configuration is needed.
+
+
+## Import reviewed sheet Markdown without AI
+
+Version `0.4.0` adds `context import`. Use it to preserve a previously written/reviewed
+sheet interpretation exactly, with heading and image-link adjustments only. It does
+not start Excel, render images, invoke Codex, or require the `[context]` extra.
+
+```console
+tkn-excel-catalog context import --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --markdown "C:\path\to\Solutions.context.md" --dry-run
+tkn-excel-catalog context import --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --markdown "C:\path\to\Solutions.context.md"
+```
+
+The proxy must already exist. Input Markdown must have exactly one ATX H1 title;
+H1 becomes `## <sheet> — Context`, H2 becomes H3, and so on (input H6 is rejected).
+Code fences and inline code remain source text. New context sections are placed
+after Workbook Map and before Extracted Text. Existing blocks are replaced in place.
+
+Relative inline/reference image links are copied into the proxy's sibling
+`img/<book-key>/sheet-<id>/import-<hash>/` and rewritten to portable relative links.
+Local images must exist within the input Markdown's directory tree; absolute paths,
+path escapes and unsupported local file types are rejected. HTTP(S), mail and anchor
+links are retained without fetching them. Source Markdown and images are unchanged.
+Input Frontmatter remains provenance in `provenance.json`; it does not replace the
+proxy's identity/metadata. Declared workbook/sheet identities are validated. A source
+snapshot hash mismatch produces a warning and preserves the historical provenance.
+
+The import writes a backup under the application's context state directory before
+updating the proxy. An identical re-import is a no-op. Modified context text or images
+requires explicit `--force` to replace/restore. Missing images can be restored by
+re-importing. An imported section is protected from ordinary `context build`, even
+when the workbook changes: the result is `retained`, with zero AI calls/tokens.
+`context build --force` explicitly replaces it with fresh AI-generated content.
+Dry-run validates without creating notes, images, backups, state or locks.
+
+### Frontmatter layout 2.1
+
+The profile now writes `schemaVersion: "2.1"`. New notes omit `## Overview` and
+`## Workbook Path`. Normal note rendering during synchronization, and context import,
+migrate these named legacy sections: Overview prose moves into `description` (appended
+when an existing description differs), and the actual workbook path is written to
+`sourceFullPath`. Known generic placeholder overviews are discarded. Path annotations
+remain in the body. The legacy path section can still be read before migration.
+
+`context import --description "..."` explicitly replaces the note description.
+Otherwise the existing description and migrated overview prose are retained.
+The import changes only `description`, `sourceFullPath`, and `schemaVersion` in proxy
+Frontmatter; unrelated fields, comments, timestamps, IDs and text are preserved.
+No bulk Vault migration is performed automatically: existing notes change only when
+targeted by an import or a normal synchronization write. `description` remains separate
+from Excel's `comments` property, and `sourceFileName` remains the rename request field.

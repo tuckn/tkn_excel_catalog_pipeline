@@ -65,11 +65,30 @@ class SyncConfig:
 
 
 @dataclass(frozen=True)
+class ContextConfig:
+    executable: str = "codex"
+    model: str = "gpt-5.6-sol"
+    reasoning_effort: str = "medium"
+    language: str = "Japanese"
+    timeout_seconds: int = 600
+    max_images: int = 24
+    tile_width_points: int = 1200
+    tile_height_points: int = 800
+    overlap_points: int = 80
+    image_dpi: int = 150
+    max_cells: int = 10000
+    max_objects: int = 10000
+    max_input_chars: int = 200000
+    max_workbook_mb: int = 100
+
+
+@dataclass(frozen=True)
 class AppConfig:
     schema_version: int
     sources: tuple[SourceConfig, ...]
     sync: SyncConfig
     loaded_files: tuple[Path, ...] = ()
+    context: ContextConfig = field(default_factory=ContextConfig)
 
 
 @dataclass

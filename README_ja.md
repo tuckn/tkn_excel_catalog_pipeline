@@ -10,6 +10,9 @@ ExcelからMarkdownへの反映は`pull`、MarkdownからExcelへの反映は`pu
 通常の`pull`、`push`、`adopt`は、command名が表す変更を実行します。
 read-only previewには`--dry-run`を明示します。workbookや代理ノートを自動削除しません。
 
+キャンバス型のノートには、任意の`context build`コマンドでシートを画像化し、生成AIによる
+Markdown本文を追加できます。後述の「シートの視覚的なcontextをMarkdown化する」を参照してください。
+
 ## 必要環境
 
 - WindowsまたはPython 3.11以上が動く環境
@@ -39,7 +42,7 @@ install後にCLI entry pointが動作することを確認します。現在の�
 version `0.2.0`で実行境界が変わります。optionなしの`pull`、`push`、`adopt`は
 書き込みを行い、`--dry-run`だけがpreview modeです。再install前に、`0.1.x`の
 optionなしdry-runへ依存しているTask Scheduler、shell script、保存済み手順を更新して
-ください。旧`--write-notes`と`--write-excel`は`0.2.x`の互換期間中も受け付け、通常実行と
+ください。旧`--write-notes`と`--write-excel`は互換性のため引き続き受け付け、通常実行と
 同じ書き込みを行いますが、deprecation warningを表示します。
 
 `git pull`などでrepositoryを更新した後は、次のcommandで再インストールします。
@@ -260,7 +263,7 @@ runごとの`summary.json`や`differences.csv`は実行reportであり、上記�
 
 | Markdown代理ノート | Excel core property            |
 | ------------------ | ------------------------------ |
-| `schemaVersion: "2.0"` | 現行の代理note Frontmatter契約。workbook metadataではない |
+| `schemaVersion: "2.1"` | 現行の代理note Frontmatter契約。workbook metadataではない |
 | `title`          | Title                          |
 | `subject`        | Subject                        |
 | `author`         | Author / creatorを単一文字列で保持 |
@@ -270,8 +273,9 @@ runごとの`summary.json`や`differences.csv`は実行reportであり、上記�
 | `sourceCreated`  | Created。source-ownedかつpull専用 |
 | `sourceModified` | Modified。source-ownedかつpull専用 |
 | `sourceFileName` | source root基準の相対workbook path。編集時は明示rename/move要求 |
+| `sourceFullPath` | 生成するworkbookの絶対パス。本文Workbook Pathの移行先であり、rename要求には使わない |
 
-`description`は代理ノート専用の任意説明で、Excelへpushしません。Frontmatterのlist値は
+`description`は代理ノート全体の概要で、Excelへpushしません。本文のOverviewは廃止します。Frontmatterのlist値は
 既定ではquote付きObsidian linkとして保持します。通常文字列にする場合は
 `sources[].notes.frontmatter_term_format: plain`を設定します。どちらの形式もExcelへは
 link記法を含まないtermとして`; `で結合します。
@@ -282,7 +286,7 @@ scalarとし、`schemaVersion`はquote付き文字列のまま保持します。
 
 代理ノート名は`<workbook-name>.xlsx.md`または`<workbook-name>.xlsm.md`です。再帰探索時はsourceの相対folder構造をnotes root配下に再現します。生成管理する
 本文sectionは`excel-catalog` markerで囲みます。未知のFrontmatter fieldとmarker外の
-手書き本文は保持します。workbook core metadataとstable custom IDはFrontmatterに置くため、
+手書き本文は保持します。ただし、廃止するOverview・Workbook Pathは後述のとおり明示的に移行します。workbook core metadataとstable custom IDはFrontmatterに置くため、
 schema 2.0では`## Excel Metadata`を生成せず、通常のnote書込み時に旧managed sectionを
 削除します。
 `schemaVersion`がない、またはschema 1.0の`noun` / `nouns`を使うlegacy代理noteも
@@ -463,3 +467,153 @@ uv build
 
 testはsynthetic workbookだけを使用します。private path、実workbook metadata、credential、
 Vault内容をfixtureや文書へ追加しないでください。
+
+## シートの視覚的なcontextをMarkdown化する（任意）
+
+`0.3.0`で`context build`を追加しました。Excelによる描画と、セル・図形の文字情報を組み合わせ、
+Excelをキャンバスとして使ったノートの内容をMarkdownにまとめます。通常の`pull`、`push`、
+`adopt`、`status`から生成AIは呼びません。対象ブックとシートを明示して実行します。
+
+Windows、デスクトップ版Microsoft Excel、インストール・ログイン済みのCodex CLIが必要です。
+画像化用の任意依存パッケージを含めてインストールします。
+
+```console
+cd "C:\path\to\tkn_excel_catalog_pipeline"
+uv tool install ".[context]" --reinstall
+tkn-excel-catalog context --help
+```
+
+まず`pull`でproxy noteを作成してください。シート名の一覧、書き込みなしの事前確認、生成は次のように実行します。
+
+```console
+tkn-excel-catalog context sheets --source personal-excel --workbook "example.xlsx"
+tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --dry-run
+tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions"
+tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --sheet "Notes"
+```
+
+`--sheet`は完全一致の名前で複数指定できます。`--all-sheets`は表示中の全シートを明示的に選択します。
+非表示シートは`--sheet`で名前を指定した場合だけ対象です。未対応のシート種別はAIを呼ぶ前にエラーにします。
+ブックの相対パスは選択したsourceのrootを基準に解決します。絶対パスでも、そのsource内にあり、
+include/ignoreの条件を満たす必要があります。選択した全シートの事前検証後、1シートずつ処理し、
+最初のエラーで停止します。それまでに成功したシートの結果は残ります。
+
+`--dry-run`は保存済みブック、シート選択、既存ノート、cache・手動編集の状態を確認します。
+永続ファイルを作成せず、Excelの起動、画像化、認証、AI呼び出しも行いません。
+画像数やtoken数は実際の描画・生成前には確定できません。`context sheets`も読み取り専用です。
+contextコマンドはstdoutに1つのcompact JSON、stderrに進捗・tokenのログを出します。
+`--quiet`では情報ログを省略します。
+
+### 開いているExcelと画像化
+
+Excelを開いたまま実行できます。通常のファイル読み取りが拒否される場合でも、Windowsの共有読み取りで
+**最後に保存されたファイル**を取得します。Excel画面上の未保存の編集は含みません。
+取得中に保存による変更を検出した場合は、中途半端なsnapshotを使わず再実行を案内します。
+一時コピーを別のExcelインスタンスで開き、マクロ・イベント・リンク更新を無効にして描画し、
+保存せず閉じます。一時コピー側では自動再計算と起動時の外部データ更新も抑止します。
+Excel 4マクロシートや、UTF-8以外で保存されたブック・接続情報のXMLは画像化の対象外です。
+元ブックやユーザーが開いているExcelを変更・終了しません。
+
+表示中のセル、結合セル、図形の位置から描画範囲を決めます。UsedRangeや既存の印刷範囲の外にある図形も
+対象です。詳細は一部が重なる画像に分割し、上から下、同じ高さでは左から右に並べます。
+AIには領域内をZ字の順で読み、矢印・色・配置の意味を解釈するよう指示します。
+適切なサイズの全体図も付けます。全体図のPDFが複数ページになる場合は連結します。
+極端に離れた領域は巨大な空白画像を作らず、座標付きの詳細画像として扱います。
+詳細領域が想定外に複数ページになった場合は、欠落を黙認せず停止します。
+
+AIに渡すのは選択シートの画像、文字、位置情報です。初期実装はCodex CLIを使用し、
+画像入力に対応するモデルを指定します。既定は`gpt-5.6-sol`、推論量は`medium`です。
+選択シートの情報はログイン先のCodexサービスに送られます。AI呼び出しの自動再試行は行いません。
+小さな文字、曖昧な矢印の先端、未対応の埋め込みオブジェクト、説明のない色の意味などは、確認が必要な場合があります。
+AIには原文の記述と推測を区別し、不明点を明記するよう指示します。
+
+### 保存先、再実行、手動編集の保護
+
+既存proxy noteにシートごとの`context-<sheetId>`管理セクションを追加します。
+Frontmatter、管理セクション外の文章、他シートの生成結果を保持します。通常の`pull`もこのセクションを保持します。
+
+画像と抽出根拠は、Markdownと同階層の`img`以下に保存します。Markdown内のリンクは相対パスです。
+
+```text
+example.xlsx.md
+img/
+  <book-key>/sheet-<id>/<generation>/
+    001.png
+    002.png
+    evidence.json
+```
+
+ノートと`img`を一緒に移動すれば、リンクを維持できます。サブフォルダ内のノートにも、そのノートと同階層の
+`img`を使います。識別子によりブック・シート間の名前衝突を防ぎます。古い画像は自動削除しません。
+PDFとブックのsnapshotは一時ファイル、PNGと抽出根拠のJSONは保存対象です。
+実データやusage記録を公開リポジトリにコミットしないでください。
+
+シート内容、関連する内部データ、設定、promptの版が同じで、画像と生成セクションが保持されていれば、
+cacheを使って終了します。Excelの起動もAI呼び出しもなく、token消費は0です。
+共有書式の変更などは複数シートのcacheを無効にする場合がありますが、無関係なセル文字列だけの変更は通常影響しません。
+`--force`はcacheを使わず再生成し、**指定シートの生成セクション内**の手動編集を置き換える明示的な指定です。
+指定しない場合、生成後の手直しや対応するstateの欠落を検出して保護します。
+生成を待つ間にノートが編集された場合は、`--force`でもその編集を上書きせず停止します。
+
+context用stateとusage記録は`~/.tkn/excel_catalog_pipeline/state/context/`に保存し、
+通常の同期stateと分離します。同じノートへの同時生成はロックで防ぎます。
+強制終了でロックが残った場合は、処理が動いていないことを確認してから表示されたロックを除去してください。
+AIの失敗、timeout、不正な応答では既存ノートを維持します。保存の途中で失敗した場合、未使用の画像が残ることがあります。
+
+### token表示と設定
+
+AI呼び出しごとに入力、出力、キャッシュ入力、推論token、所要時間を表示し、結果JSONにその実行の合計を含めます。
+キャッシュ入力は**入力の内数**、推論tokenは**出力の内数**なので重ねて加算しません。
+`turn.completed`の使用量だけを合計し、累積値のイベントは合計しません。
+取得不能・中断時は0とせず`unknown`/`null`とし、判明した部分的な使用量をusage JSONに残します。
+usage記録にはprompt本文、生成本文、認証情報を保存しません。料金は利用アカウント・契約によって異なるため、
+tokenからの金額推定は行いません。cacheが使えた場合は呼び出し数・tokenとも0です。
+
+設定例に`context`を追加しました。既存のconfig.yamlはそのまま利用できます。
+設定項目は`executable`、`model`、`reasoning_effort`、`language`、
+`timeout_seconds`（AI呼び出し）、`max_images`（全体図を含む）、
+`tile_width_points`、`tile_height_points`、`overlap_points`、`image_dpi`、
+`max_cells`、`max_objects`、`max_input_chars`、`max_workbook_mb`です。
+上限を超えた場合は内容を切り捨てず停止します。確認のうえ、必要な上限を変更してください。
+画像保存先は相対リンクを保つため、現時点では固定の`img`としており、追加のパス設定は不要です。
+
+
+## 確認済みのシートMarkdownをAIなしで取り込む
+
+`0.4.0`で`context import`を追加しました。以前に作成・確認した本文を、見出しと画像リンクの調整だけで
+取り込みます。Excelの起動、画像化、Codexによる再生成は行わず、`[context]`追加依存も不要です。
+
+```console
+tkn-excel-catalog context import --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --markdown "C:\path\to\Solutions.context.md" --dry-run
+tkn-excel-catalog context import --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --markdown "C:\path\to\Solutions.context.md"
+```
+
+取り込み先proxy noteは作成済みである必要があります。入力はATX形式のH1タイトルを1つ持つMarkdownです。
+H1を`## <シート名> — Context`へ、H2をH3へ、以降も1段下げます。入力H6は変換できないため拒否します。
+コードブロック・インラインコードは文章として保持します。新しいcontextはWorkbook Mapの後、Extracted Textの前に置き、
+既存contextの更新ではその位置を維持します。
+
+本文・参照定義の相対画像リンクは、proxyと同階層の`img/<book-key>/sheet-<id>/import-<hash>/`へコピーし、
+相対リンクに書き換えます。画像は入力Markdownのディレクトリ配下に存在する必要があり、絶対パス、範囲外への参照、
+未対応のローカルファイル形式を拒否します。HTTP(S)・メール・見出しへのリンクは取得せず保持します。
+入力Markdownと画像は変更しません。入力Frontmatterは`provenance.json`に残し、proxyのID・metadataに上書きしません。
+入力にブック・シート識別情報があれば照合します。取得時のブックハッシュが現在と異なる場合は警告し、過去の出典情報として保持します。
+
+更新前のproxyはapplicationのcontext stateフォルダにバックアップします。同じ内容の再取り込みは変更なしです。
+取り込み後に編集された本文・画像の置き換えには`--force`が必要です。欠けた画像は再取り込みで復元できます。
+取り込んだセクションは、ブックが更新されても通常の`context build`で上書きしません。
+`retained`として保持し、AI呼び出し・tokenは0です。`context build --force`を明示するとAIで再生成して置き換えます。
+`--dry-run`ではnote、画像、backup、state、lockを作成せず事前検証します。
+
+### Frontmatter構成2.1
+
+profileの`schemaVersion`を`"2.1"`に更新しました。新規ノートには`## Overview`と`## Workbook Path`を生成しません。
+通常の同期によるノート書き込み、またはcontext import時に、既存ノートのこの2つのセクションを移行します。
+Overviewの独自文章は`description`へ移し、既存のdescriptionと異なる場合は追記して保持します。
+既知の汎用的な下書き文は除去します。ブックの絶対パスは`sourceFullPath`に入れ、パス節の補足文章は本文に残します。
+移行前の旧Workbook Pathも読み取りには対応します。
+
+`context import --description "..."`を明示した場合だけ、ノートのdescriptionを指定内容に置き換えます。
+取り込みではFrontmatterの`description`、`sourceFullPath`、`schemaVersion`のみ変更し、他の項目・コメント・日時・IDを保持します。
+Vault全体の一括移行は行いません。取り込みや通常の同期で書き込み対象となったノートから新しい構成になります。
+`description`はExcelの`comments`とは別項目で、rename要求は引き続き`sourceFileName`で指定します。

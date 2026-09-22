@@ -4,13 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tkn-excel-catalog-pipeline"
-version = "0.2.0"
+version = "0.4.1"
 description = "Synchronize Excel workbook metadata with Markdown catalog notes."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Tuckn" }]
 dependencies = ["PyYAML>=6.0.2"]
+
+[project.optional-dependencies]
+context = ["pywin32>=308; sys_platform == 'win32'", "pypdfium2>=4.30", "Pillow>=11.0"]
 
 [project.scripts]
 tkn-excel-catalog = "excel_catalog_pipeline.cli:main"

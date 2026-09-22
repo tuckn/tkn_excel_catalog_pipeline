@@ -15,6 +15,7 @@ import yaml
 
 from ..discovery import matches_any, normalize_relative_path
 from ..models import ProxyNote, SourceConfig, WorkbookInfo
+from ..note_layout import retire_sections
 from ..note_resources import (
     ManagedBlock,
     NoteResourceError,
@@ -157,7 +158,7 @@ def _frontmatter_terms(value: Any) -> str:
 
 def note_metadata(note: ProxyNote) -> dict[str, str]:
     schema_version = _frontmatter_string(note.frontmatter.get("schemaVersion"))
-    uses_v2_metadata = schema_version == "2.0" or any(
+    uses_v2_metadata = schema_version.startswith("2.") or any(
         field in note.frontmatter for field in ("subject", "author", "categories", "comments")
     )
     if uses_v2_metadata:
@@ -317,8 +318,11 @@ def render_note(
         current_schema = _frontmatter_string(existing_frontmatter.get("schemaVersion"))
         description = (
             _frontmatter_string(existing_frontmatter.get("description"))
-            if current_schema == template.schema_version
+            if current_schema.startswith("2.")
             else ""
+        )
+        clean_body, description = retire_sections(
+            existing.body if existing else "", description, str(workbook.path)
         )
         source_created = (
             workbook.core.get("created", "")
@@ -346,6 +350,7 @@ def render_note(
                 "files": existing_frontmatter.get("files", []),
                 "source_root": source.id,
                 "source_file_name": values["sourceFileName"],
+                "source_full_path": str(workbook.path),
                 "source_id": f"{source.id}:{stable_part}",
                 "source_created": source_created,
                 "source_modified": source_modified,
@@ -368,7 +373,7 @@ def render_note(
     frontmatter = _merge_frontmatter(rendered_template.frontmatter, existing_frontmatter)
 
     if existing:
-        body = _marker_pattern("excel-metadata").sub("", existing.body)
+        body = _marker_pattern("excel-metadata").sub("", clean_body)
         body = re.sub(
             r"^##\s+Excel Metadata\s*$\r?\n.*?(?=^##\s+|\Z)",
             "",

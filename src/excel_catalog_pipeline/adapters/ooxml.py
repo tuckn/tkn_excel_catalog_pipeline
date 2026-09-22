@@ -8,10 +8,10 @@ byte-for-byte unchanged.
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
 import shutil
-import tempfile
 import uuid
 import zipfile
 from datetime import datetime
@@ -22,6 +22,7 @@ from xml.etree import ElementTree as ET
 from ..discovery import is_source_path_in_scope
 from ..models import SourceConfig, WorkbookInfo
 from ..paths import temporary_root
+from ..shared_read import read_shared
 
 OOXML_EXTENSIONS = {".xlsx", ".xlsm"}
 CORE_PATH = "docProps/core.xml"
@@ -279,7 +280,7 @@ def inspect_workbook(
         info.warnings.append(f"Unsupported workbook extension: {info.extension}")
         return info
 
-    def populate(inspect_path: Path) -> None:
+    def populate(inspect_path: Path | io.BytesIO) -> None:
         with zipfile.ZipFile(inspect_path) as archive:
             bad_entry = archive.testzip()
             if bad_entry:
@@ -296,13 +297,10 @@ def inspect_workbook(
         populate(path)
     except PermissionError:
         try:
-            with tempfile.TemporaryDirectory(prefix="excel-catalog-inspect-") as temp_dir:
-                copy = Path(temp_dir) / path.name
-                shutil.copy2(path, copy)
-                populate(copy)
-                info.warnings.append(
-                    "Inspected a platform-temporary copy because the source was locked."
-                )
+            populate(io.BytesIO(read_shared(path)))
+            info.warnings.append(
+                "Inspected saved workbook bytes using shared read access; unsaved edits are excluded."
+            )
         except (OSError, zipfile.BadZipFile, ET.ParseError, RuntimeError) as exc:
             info.read_status = "read-error"
             info.warnings.append(str(exc))

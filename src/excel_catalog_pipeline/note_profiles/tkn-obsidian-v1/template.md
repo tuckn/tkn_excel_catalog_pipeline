@@ -1,6 +1,6 @@
 ---
 type: Excel
-schemaVersion: "2.0"
+schemaVersion: "2.1"
 title: {{ title }}
 description: {{ description }}
 subject: {{ subject }}
@@ -11,6 +11,7 @@ comments: {{ comments }}
 files: {{ files }}
 sourceRoot: {{ source_root }}
 sourceFileName: {{ source_file_name }}
+sourceFullPath: {{ source_full_path }}
 sourceId: {{ source_id }}
 sourceCreated: {{ source_created }}
 sourceModified: {{ source_modified }}
@@ -20,16 +21,6 @@ noteId: {{ note_id }}
 ---
 
 # {{ title }}
-
-## Overview
-
-{{ description | Excel workbookの検索・管理用代理ノート。 }}
-
-<!-- excel-catalog:begin workbook-path -->
-## Workbook Path
-
-{{ workbook_path }}
-<!-- excel-catalog:end workbook-path -->
 
 <!-- excel-catalog:begin workbook-map -->
 ## Workbook Map

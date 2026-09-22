@@ -5,13 +5,14 @@ from __future__ import annotations
 import uuid
 from contextlib import suppress
 from copy import deepcopy
+from dataclasses import asdict
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
 
 import yaml
 
-from .models import AppConfig, FrontmatterTermFormat, SourceConfig, SyncConfig
+from .models import AppConfig, ContextConfig, FrontmatterTermFormat, SourceConfig, SyncConfig
 from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
@@ -19,6 +20,7 @@ SCHEMA_VERSION = 1
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
     "sources": [],
+    "context": asdict(ContextConfig()),
     "sync": {
         "pull_preserves_user_metadata": True,
         "delete_missing_notes": False,
@@ -27,7 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_extracted_text_chars": 12000,
     },
 }
-TOP_LEVEL_KEYS = {"schema_version", "sources", "sync"}
+TOP_LEVEL_KEYS = {"schema_version", "sources", "sync", "context"}
 SYNC_KEYS = set(DEFAULT_CONFIG["sync"])
 SOURCE_KEYS = {"id", "path", "recursive", "include", "ignore", "notes"}
 NOTES_KEYS = {"root", "profile", "frontmatter_term_format", "rename_adapter"}
@@ -225,11 +227,35 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
                 rename_adapter=str(notes.get("rename_adapter", "report-only")),
             )
         )
+    context_raw = data.get("context", {})
+    if not isinstance(context_raw, dict):
+        raise ConfigError("context must be a mapping")
+    defaults = asdict(ContextConfig())
+    _reject_unknown(context_raw, set(defaults), "context")
+    context_values = {**defaults, **context_raw}
+    for name, default in defaults.items():
+        value = context_values[name]
+        if isinstance(default, int):
+            if type(value) is not int or value <= 0:
+                raise ConfigError(f"context.{name} must be a positive integer")
+        elif not isinstance(value, str) or not value.strip():
+            raise ConfigError(f"context.{name} must be a non-empty string")
+    if context_values["reasoning_effort"] not in {"low", "medium", "high", "xhigh"}:
+        raise ConfigError("context.reasoning_effort must be low, medium, high or xhigh")
+    if context_values["overlap_points"] * 2 >= min(
+        context_values["tile_width_points"], context_values["tile_height_points"]
+    ):
+        raise ConfigError("context.overlap_points must be less than half the tile dimensions")
+    if not 72 <= context_values["image_dpi"] <= 300:
+        raise ConfigError("context.image_dpi must be between 72 and 300")
+    if context_values["max_images"] > 100:
+        raise ConfigError("context.max_images must be at most 100")
     return AppConfig(
         schema_version=SCHEMA_VERSION,
         sources=tuple(sources),
         sync=sync,
         loaded_files=loaded_files,
+        context=ContextConfig(**context_values),
     )
 
 
@@ -268,5 +294,6 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
             "allow_source_rename": config.sync.allow_source_rename,
             "max_extracted_text_chars": config.sync.max_extracted_text_chars,
         },
+        "context": asdict(config.context),
         "loadedConfigFiles": [str(path) for path in config.loaded_files],
     }
