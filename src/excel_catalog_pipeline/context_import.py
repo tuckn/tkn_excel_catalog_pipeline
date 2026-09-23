@@ -36,7 +36,7 @@ REFERENCE = re.compile(r"^(?P<prefix> {0,3}\[[^\]\n]+\]:\s*)(?P<target><[^>\n]+>
 
 
 def convert_body(
-    body: str, sheet: str, input_dir: Path, relative_dir: Path
+    body: str, sheet: str, sheet_id: str, input_dir: Path, relative_dir: Path
 ) -> tuple[str, dict[str, bytes]]:
     """Demote ATX headings and copy only explicitly referenced local image bytes."""
     if "<!-- excel-catalog:" in body:
@@ -91,7 +91,7 @@ def convert_body(
                 )
             if level == 1:
                 titles += 1
-                line = f"## {sheet} — Context\n"
+                line = f"## {sheet} (sheetId: {sheet_id})\n"
             else:
                 line = "#" + line
         # Inline code is source text, not a link to an attachment.
@@ -163,7 +163,9 @@ def import_context(
     relative_dir = (
         Path("img") / book_key / f"sheet-{sheet['id']}" / f"import-{digest(input_bytes)[:16]}"
     )
-    content, image_bytes = convert_body(imported.body, sheet_name, input_path.parent, relative_dir)
+    content, image_bytes = convert_body(
+        imported.body, sheet_name, sheet["id"], input_path.parent, relative_dir
+    )
     asset_hashes = {relative: digest(value) for relative, value in image_bytes.items()}
     import_key = digest(
         json.dumps(

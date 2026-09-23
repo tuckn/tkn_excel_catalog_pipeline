@@ -91,12 +91,12 @@ def test_import_layout_provenance_images_and_idempotency(setup_import):
     assert b"# preserve comment\r\n" in note.read_bytes()
     assert "## Overview" not in current.body and "## Workbook Path" not in current.body
     assert (
-        "## Data — Context" in current.body
+        "## Data (sheetId: 1)" in current.body
         and "### Topic" in current.body
         and "#### Detail" in current.body
     )
     assert "# Untouched code\n[Example](missing.png)" in current.body
-    assert current.body.index("## Workbook Map") < current.body.index("## Data — Context")
+    assert current.body.index("## Workbook Map") < current.body.index("## Data (sheetId: 1)")
     assert current.body.endswith("## My notes\n\nKeep this exactly.\n")
     assert len(list((source.note_root / "img").rglob("*.png"))) == 1
     assert len(list((source.note_root / "img").rglob("provenance.json"))) == 1

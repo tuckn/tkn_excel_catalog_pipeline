@@ -589,7 +589,7 @@ tkn-excel-catalog context import --source personal-excel --workbook "example.xls
 ```
 
 取り込み先proxy noteは作成済みである必要があります。入力はATX形式のH1タイトルを1つ持つMarkdownです。
-H1を`## <シート名> — Context`へ、H2をH3へ、以降も1段下げます。入力H6は変換できないため拒否します。
+H1を`## <シート名> (sheetId: <id>)`へ、H2をH3へ、以降も1段下げます。入力H6は変換できないため拒否します。
 コードブロック・インラインコードは文章として保持します。新しいcontextはWorkbook Mapの後、Extracted Textの前に置き、
 既存contextの更新ではその位置を維持します。
 

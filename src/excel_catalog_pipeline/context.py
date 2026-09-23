@@ -286,7 +286,7 @@ def build_context(
                 heading = sheet["name"].replace("\n", " ").replace("\r", " ")
                 block = (
                     f"<!-- excel-catalog:begin context-{sheet['id']} -->\n"
-                    f"## {heading} — Context\n\n{markdown}\n\n"
+                    f"## {heading} (sheetId: {sheet['id']})\n\n{markdown}\n\n"
                     f"### Source images\n\n{links}\n\n"
                     f"<!-- Saved-file snapshot SHA256: {digest(data)}; generated: {utc_now()}; "
                     f"model: {config.model}; prompt: {PROMPT_VERSION} -->\n"

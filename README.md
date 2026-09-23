@@ -623,7 +623,7 @@ tkn-excel-catalog context import --source personal-excel --workbook "example.xls
 ```
 
 The proxy must already exist. Input Markdown must have exactly one ATX H1 title;
-H1 becomes `## <sheet> — Context`, H2 becomes H3, and so on (input H6 is rejected).
+H1 becomes `## <sheet> (sheetId: <id>)`, H2 becomes H3, and so on (input H6 is rejected).
 Code fences and inline code remain source text. New context sections are placed
 after Workbook Map and before Extracted Text. Existing blocks are replaced in place.
 

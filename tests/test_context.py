@@ -240,6 +240,7 @@ def test_build_preserves_bytes_outside_block_and_reuses_cache(build_setup) -> No
     assert first["usage"]["inputTokens"] == 20
     added = context.existing_block(note.read_bytes().decode("utf-8-sig"), "1")
     assert added is not None
+    assert "## Data (sheetId: 1)\r\n" in added
     assert note.read_bytes().replace(added.encode("utf-8") + b"\r\n\r\n", b"", 1) == before
     assert workbook.read_bytes() == source_before
     images = list((note.parent / "img").rglob("*.png"))
