@@ -19,7 +19,7 @@ from .paths import global_config_path
 SCHEMA_VERSION = 1
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
-    "sources": [],
+    "sources": {},
     "context": asdict(ContextConfig()),
     "sync": {
         "pull_preserves_user_metadata": True,
@@ -38,6 +38,61 @@ FRONTMATTER_TERM_FORMATS = {"obsidian-link", "plain"}
 
 class ConfigError(ValueError):
     """Configuration could not be loaded or validated."""
+
+
+class ConfigLoader(yaml.SafeLoader):
+    """Reject duplicate explicit YAML keys instead of silently losing settings."""
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        seen: set[Any] = set()
+        for key_node, _ in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                continue
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                if key in seen:
+                    raise yaml.constructor.ConstructorError(
+                        "while reading config",
+                        node.start_mark,
+                        f"Duplicate config key: {key!r}",
+                        key_node.start_mark,
+                    )
+                seen.add(key)
+            except TypeError as exc:
+                raise yaml.constructor.ConstructorError(
+                    "while reading config",
+                    node.start_mark,
+                    "Config keys must be hashable",
+                    key_node.start_mark,
+                ) from exc
+        return super().construct_mapping(node, deep=deep)
+
+
+def _source_items(raw: Any) -> dict[str, dict[str, Any]]:
+    """Use mapping keys as IDs; accept legacy lists without rewriting user files."""
+    if isinstance(raw, list):
+        result: dict[str, dict[str, Any]] = {}
+        for index, item in enumerate(raw):
+            if not isinstance(item, dict):
+                raise ConfigError(f"sources[{index}] must be a mapping")
+            source_id = item.get("id")
+            if not isinstance(source_id, str) or not source_id.strip():
+                raise ConfigError(f"sources[{index}].id must be a non-empty string")
+            if source_id in result:
+                raise ConfigError(f"Duplicate source id: {source_id}")
+            result[source_id] = item
+        raw = result
+    if not isinstance(raw, dict):
+        raise ConfigError("sources must be a mapping keyed by source ID")
+    for source_id, item in raw.items():
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise ConfigError("sources keys must be non-empty strings")
+        if not isinstance(item, dict):
+            raise ConfigError(f"sources[{source_id!r}] must be a mapping")
+        explicit_id = item.get("id")
+        if explicit_id is not None and explicit_id != source_id:
+            raise ConfigError(f"sources[{source_id!r}].id must match its source key or be null")
+    return cast(dict[str, dict[str, Any]], raw)
 
 
 def config_template_text() -> str:
@@ -91,7 +146,7 @@ def init_user_config(*, force: bool = False, target: Path | None = None) -> tupl
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(base)
     for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
+        if key != "sources" and isinstance(value, dict) and isinstance(result.get(key), dict):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = deepcopy(value)
@@ -100,7 +155,7 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 
 def _read_yaml(path: Path) -> dict[str, Any]:
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
+        raw = yaml.load(path.read_text(encoding="utf-8-sig"), Loader=ConfigLoader)
     except (OSError, yaml.YAMLError) as exc:
         raise ConfigError(f"Failed to read config {path}: {exc}") from exc
     if raw is None:
@@ -164,62 +219,50 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         raise ConfigError("sync.max_extracted_text_chars must be a positive integer")
     sync = SyncConfig(**sync_raw)
 
-    sources_raw = data.get("sources")
-    if not isinstance(sources_raw, list):
-        raise ConfigError("sources must be a list")
+    sources_raw = _source_items(data.get("sources"))
     sources: list[SourceConfig] = []
-    seen: set[str] = set()
-    for index, item in enumerate(sources_raw):
-        if not isinstance(item, dict):
-            raise ConfigError(f"sources[{index}] must be a mapping")
-        _reject_unknown(item, SOURCE_KEYS, f"sources[{index}]")
-        source_id = item.get("id")
-        if not isinstance(source_id, str) or not source_id.strip():
-            raise ConfigError(f"sources[{index}].id must be a non-empty string")
-        if source_id in seen:
-            raise ConfigError(f"Duplicate source id: {source_id}")
-        seen.add(source_id)
+    for source_id, item in sources_raw.items():
+        where = f"sources[{source_id!r}]"
+        _reject_unknown(item, SOURCE_KEYS, where)
         recursive = item.get("recursive", False)
         if not isinstance(recursive, bool):
-            raise ConfigError(f"sources[{index}].recursive must be boolean")
+            raise ConfigError(f"{where}.recursive must be boolean")
         include = item.get("include", ["*.xlsx", "*.xlsm"])
         if (
             not isinstance(include, list)
             or not include
             or not all(isinstance(value, str) and value for value in include)
         ):
-            raise ConfigError(f"sources[{index}].include must be a non-empty string list")
+            raise ConfigError(f"{where}.include must be a non-empty string list")
         ignore = item.get("ignore", [])
         if not isinstance(ignore, list) or not all(
             isinstance(value, str) and value for value in ignore
         ):
-            raise ConfigError(f"sources[{index}].ignore must be a string list")
+            raise ConfigError(f"{where}.ignore must be a string list")
         notes = item.get("notes")
         if not isinstance(notes, dict):
-            raise ConfigError(f"sources[{index}].notes must be a mapping")
-        _reject_unknown(notes, NOTES_KEYS, f"sources[{index}].notes")
+            raise ConfigError(f"{where}.notes must be a mapping")
+        _reject_unknown(notes, NOTES_KEYS, f"{where}.notes")
         profile = notes.get("profile", "tkn-obsidian-v1")
         if not isinstance(profile, str) or not profile.strip():
-            raise ConfigError(f"sources[{index}].notes.profile must be a non-empty string")
+            raise ConfigError(f"{where}.notes.profile must be a non-empty string")
         try:
             load_note_template(profile)
         except NoteResourceError as exc:
-            raise ConfigError(f"sources[{index}].notes.profile: {exc}") from exc
+            raise ConfigError(f"{where}.notes.profile: {exc}") from exc
         frontmatter_term_format = notes.get("frontmatter_term_format", "obsidian-link")
         if (
             not isinstance(frontmatter_term_format, str)
             or frontmatter_term_format not in FRONTMATTER_TERM_FORMATS
         ):
             allowed = ", ".join(sorted(FRONTMATTER_TERM_FORMATS))
-            raise ConfigError(
-                f"sources[{index}].notes.frontmatter_term_format must be one of: {allowed}"
-            )
+            raise ConfigError(f"{where}.notes.frontmatter_term_format must be one of: {allowed}")
         sources.append(
             SourceConfig(
                 id=source_id,
-                path=_path_value(item.get("path"), f"sources[{index}].path"),
+                path=_path_value(item.get("path"), f"{where}.path"),
                 include=tuple(include),
-                note_root=_path_value(notes.get("root"), f"sources[{index}].notes.root"),
+                note_root=_path_value(notes.get("root"), f"{where}.notes.root"),
                 recursive=recursive,
                 ignore=tuple(ignore),
                 profile=profile,
@@ -271,9 +314,8 @@ def select_sources(config: AppConfig, selector: str | None) -> tuple[SourceConfi
 def config_as_dict(config: AppConfig) -> dict[str, Any]:
     return {
         "schema_version": config.schema_version,
-        "sources": [
-            {
-                "id": source.id,
+        "sources": {
+            source.id: {
                 "path": str(source.path),
                 "recursive": source.recursive,
                 "include": list(source.include),
@@ -286,7 +328,7 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
                 },
             }
             for source in config.sources
-        ],
+        },
         "sync": {
             "pull_preserves_user_metadata": config.sync.pull_preserves_user_metadata,
             "delete_missing_notes": config.sync.delete_missing_notes,

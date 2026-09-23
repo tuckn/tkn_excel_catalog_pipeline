@@ -50,7 +50,7 @@ sourceFileName: example.xlsx
 
 ブックに対応して作る Markdown ファイルを、この文書では**代理ノート**と呼びます。
 入力フォルダとノートの保存先を組にした設定が **source** です。
-`--source` には、その組を識別する `sources[].id` を指定します。
+`--source` には、その組を識別する `sources` のキー（例: `personal-excel`）を指定します。
 
 通常の同期はローカルで完結し、Excel 本体や Obsidian の起動、認証、ネットワーク通信、生成 AI を必要としません。
 `context build` は選択シートの情報を Codex サービスへ送信します。
@@ -115,7 +115,7 @@ notepad "$HOME\.tkn\excel_catalog_pipeline\config.yaml"
 ```yaml
 schema_version: 1
 sources:
-  - id: personal-excel
+  personal-excel:
     path: 'C:\path\to\excel-workbooks'
     notes:
       root: 'C:\path\to\catalog-notes'
@@ -256,7 +256,7 @@ tkn-excel-catalog status --source personal-excel
 3. 現在の作業フォルダにある `.tkn/config.yaml`。
 4. 全体オプション `--config` で指定したファイル。
 
-辞書は項目ごとに統合しますが、`sources` などのリストは後のファイルの値で全体を置き換えます。
+辞書は項目ごとに統合します。ただし `sources` は、後のファイルに指定があれば全体を置き換えます（空の `{}` で全 source を解除）。同じIDの項目も部分統合しません。`include` などのリストも全体を置き換えます。
 相対パスは設定ファイルの場所ではなく、現在の作業フォルダを基準に解決します。
 個別の CLI オプションによる指定は、その対象となる動作で優先されます。
 `config show` はファイルを作成せず、読み込んだファイルがない場合は組み込み値を使っていることを表示します。
@@ -266,18 +266,26 @@ tkn-excel-catalog status --source personal-excel
 | 設定 | 意味・省略時の動作 |
 | --- | --- |
 | `schema_version` | 設定形式の版。`1` を指定します。 |
-| `sources[].id` | 必須。source の一意な名前です。継続利用中は安定した名前を使います。 |
-| `sources[].path` | 必須。入力ブックのルートフォルダです。 |
-| `sources[].recursive` | 既定は `false`。`true` でサブフォルダも探索します。 |
-| `sources[].include` | 既定は `["*.xlsx", "*.xlsm"]`。対象のパターンです。空リストは指定できません。 |
-| `sources[].ignore` | 既定は `[]`。入力ルートからの相対パスに適用する除外パターンです。 |
-| `sources[].notes.root` | 必須。`pull` の出力先であり、`push` の入力元です。 |
-| `sources[].notes.profile` | 既定は `tkn-obsidian-v1`。同梱のノート形式を使います。 |
-| `sources[].notes.frontmatter_term_format` | 既定は `obsidian-link`。`keywords` と `categories` を `[[用語]]` にします。`plain` は通常の文字列です。 |
-| `sources[].notes.rename_adapter` | 既定は `report-only`。`filesystem` でファイルの直接移動を許可します。[名前変更と移動](#名前変更と移動)を参照してください。 |
+| `sources.<id>` | キーが source の一意なIDです。継続利用中は安定した名前を使います。 |
+| `sources.<id>.id` | 省略または `null` を推奨。指定する場合はキーと同じ文字列にします。 |
+| `sources.<id>.path` | 必須。入力ブックのルートフォルダです。 |
+| `sources.<id>.recursive` | 既定は `false`。`true` でサブフォルダも探索します。 |
+| `sources.<id>.include` | 既定は `["*.xlsx", "*.xlsm"]`。対象のパターンです。空リストは指定できません。 |
+| `sources.<id>.ignore` | 既定は `[]`。入力ルートからの相対パスに適用する除外パターンです。 |
+| `sources.<id>.notes.root` | 必須。`pull` の出力先であり、`push` の入力元です。 |
+| `sources.<id>.notes.profile` | 既定は `tkn-obsidian-v1`。同梱のノート形式を使います。 |
+| `sources.<id>.notes.frontmatter_term_format` | 既定は `obsidian-link`。`keywords` と `categories` を `[[用語]]` にします。`plain` は通常の文字列です。 |
+| `sources.<id>.notes.rename_adapter` | 既定は `report-only`。`filesystem` でファイルの直接移動を許可します。[名前変更と移動](#名前変更と移動)を参照してください。 |
 | `sync.max_extracted_text_chars` | 既定は `12000`。1 ブックから抽出する検索用文字情報の最大文字数です。正の整数を指定します。 |
 
 `sources` が空のままでは同期を実行できません。
+配列は順序のある一覧、オブジェクト（YAML の mapping）は一意な名前と設定の対応表です。
+新形式では内側の `id` は不要です。YAML 内の重複キーや、キーと異なる `id` はエラーになります。
+
+0.5.0 から設定例と `config show` の `sources` はオブジェクト形式です。
+`schema_version: 1` と旧配列形式の読み込みは引き続き対応します。
+既存設定は `- id: personal-excel` を `personal-excel:` に置き換えるだけで移行できます。
+`config show` の出力を利用するプログラムは、配列の添字から source ID のキー参照に変更してください。
 未知の設定キーや、不正な型・値はエラーになります。
 その他の `sync` の真偽値は将来の拡張用であり、現実装は未知のノート情報を保持し、ブックやノートを削除しません。
 `sync.allow_source_rename` は現在の移動許可の判定には使いません。
@@ -288,7 +296,7 @@ Windows パスは YAML のシングルクォートで囲むと、バックスラ
 
 ```yaml
 sources:
-  - id: personal-excel
+  personal-excel:
     path: 'C:\path\to\excel-workbooks'
     recursive: true
     include:

@@ -298,7 +298,7 @@ def _log_source_configuration(logger: logging.Logger, sources: tuple[SourceConfi
     for source in sources:
         lines.extend(
             [
-                f"  - id: {source.id}",
+                f"  {json.dumps(source.id, ensure_ascii=False)}:",
                 f"    path: {_yaml_single_quoted(str(source.path))}",
                 f"    recursive: {str(source.recursive).lower()}",
                 "    include:",

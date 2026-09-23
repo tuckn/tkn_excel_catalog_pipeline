@@ -37,7 +37,7 @@ def test_config_show_prints_path_before_indented_json(monkeypatch, tmp_path: Pat
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "user.yaml")
     config = tmp_path / "config.yaml"
-    config.write_text("schema_version: 1\nsources: []\n", encoding="utf-8")
+    config.write_text("schema_version: 1\nsources: {}\n", encoding="utf-8")
     result = main(["--config", "config.yaml", "config", "show"])
     captured = capsys.readouterr()
     assert result == 0
@@ -46,6 +46,7 @@ def test_config_show_prints_path_before_indented_json(monkeypatch, tmp_path: Pat
     payload = json.loads(body)
     assert payload["command"] == "config show"
     assert payload["config"]["loadedConfigFiles"] == [str(config.resolve())]
+    assert payload["config"]["sources"] == {}
     assert '\n  "config": {\n    "schema_version": 1,' in body
     assert captured.err == ""
 
@@ -80,7 +81,7 @@ def test_cli_pull_without_option_writes_note_state_and_report(
     config.write_text(
         f'''schema_version: 1
 sources:
-  - id: example
+  example:
     path: "{workbooks.as_posix()}"
     include: ["**/*.xlsx"]
     notes:
@@ -106,9 +107,7 @@ sources:
     assert (notes / "book.xlsx.md").exists()
 
 
-def test_cli_pull_dry_run_changes_no_persistent_files(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:  # type: ignore[no-untyped-def]
+def test_cli_pull_dry_run_changes_no_persistent_files(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     workbooks = tmp_path / "workbooks"
     notes = tmp_path / "notes"
     reports = tmp_path / "reports"
@@ -117,7 +116,7 @@ def test_cli_pull_dry_run_changes_no_persistent_files(
     config.write_text(
         f'''schema_version: 1
 sources:
-  - id: example
+  example:
     path: "{workbooks.as_posix()}"
     include: ["**/*.xlsx"]
     notes:
@@ -163,7 +162,7 @@ def test_cli_status_logs_grouped_counts_and_attention_items(
     config.write_text(
         f'''schema_version: 1
 sources:
-  - id: example
+  example:
     path: "{workbooks.as_posix()}"
     include: ["**/*.xlsx"]
     notes:
@@ -239,7 +238,7 @@ def test_cli_push_logs_non_unchanged_files_and_readable_summary(
     config.write_text(
         f'''schema_version: 1
 sources:
-  - id: example
+  example:
     path: "{workbooks.as_posix()}"
     include: ["**/*.xlsx"]
     notes:
@@ -292,7 +291,7 @@ sources:
     assert result == 2
     assert captured.out == ""
     assert "[INFO] Running push for 1 configured source(s): example." in captured.err
-    assert "[INFO] Selected source configuration:\n  - id: example" in captured.err
+    assert '[INFO] Selected source configuration:\n  "example":' in captured.err
     assert f"    path: '{workbooks.resolve()}'" in captured.err
     assert "    recursive: false" in captured.err
     assert '      - "**/*.xlsx"' in captured.err
@@ -333,7 +332,7 @@ def test_cli_pull_verbose_dry_run_logs_values_without_report(
     config.write_text(
         f'''schema_version: 1
 sources:
-  - id: example
+  example:
     path: "{(tmp_path / "workbooks").as_posix()}"
     include: ["**/*.xlsx"]
     notes:
@@ -407,7 +406,7 @@ def test_legacy_write_option_is_accepted_with_deprecation_warning(
     config = tmp_path / "config.yaml"
     config.write_text(
         "schema_version: 1\nsources:\n"
-        f"  - id: example\n    path: '{tmp_path.as_posix()}'\n"
+        f"  example:\n    path: '{tmp_path.as_posix()}'\n"
         f"    notes:\n      root: '{(tmp_path / 'notes').as_posix()}'\n",
         encoding="utf-8",
     )
@@ -439,7 +438,7 @@ def test_cli_push_dry_run_validates_allowed_rename_without_report(
     config = tmp_path / "config.yaml"
     config.write_text(
         "schema_version: 1\nsources:\n"
-        f"  - id: example\n    path: '{tmp_path.as_posix()}'\n"
+        f"  example:\n    path: '{tmp_path.as_posix()}'\n"
         f"    notes:\n      root: '{(tmp_path / 'notes').as_posix()}'\n",
         encoding="utf-8",
     )
@@ -482,14 +481,16 @@ def test_cli_adopt_dry_run_lists_targets_without_report(
     config = tmp_path / "config.yaml"
     config.write_text(
         "schema_version: 1\nsources:\n"
-        f"  - id: example\n    path: '{tmp_path.as_posix()}'\n"
+        f"  example:\n    path: '{tmp_path.as_posix()}'\n"
         f"    notes:\n      root: '{(tmp_path / 'notes').as_posix()}'\n",
         encoding="utf-8",
     )
 
     def fake_run_adopt(*args, **kwargs):  # type: ignore[no-untyped-def]
         assert kwargs["write_excel"] is False
-        return [Action(status="would-adopt", source_root_id="example", source_path="book.xlsx")], None
+        return [
+            Action(status="would-adopt", source_root_id="example", source_path="book.xlsx")
+        ], None
 
     monkeypatch.setattr(cli_module, "run_adopt", fake_run_adopt)
     result = main(
@@ -508,3 +509,19 @@ def test_cli_adopt_dry_run_lists_targets_without_report(
     assert "[INFO] [would-adopt] sourcePath=book.xlsx" in captured.err
     assert "    would-adopt: 1" in captured.err
     assert not (tmp_path / "reports").exists()
+
+
+def test_config_show_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "absent")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "sources:\n  example:\n    id:\n    path: input\n    notes: {root: output}\n",
+        encoding="utf-8",
+    )
+    assert main(["--config", str(config), "config", "show"]) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out.split("\n\n", 1)[1])
+    assert list(payload["config"]["sources"]) == ["example"]
+    assert "id" not in payload["config"]["sources"]["example"]
+    assert captured.err == ""

@@ -15,16 +15,15 @@ def app_config(tmp_path: Path, *, recursive: bool = False, ignore: list[str] | N
     return validate_config(
         {
             "schema_version": 1,
-            "sources": [
-                {
-                    "id": "example",
+            "sources": {
+                "example": {
                     "path": str(tmp_path / "workbooks"),
                     "recursive": recursive,
                     "include": ["*.xlsx", "*.xlsm"],
                     "ignore": ignore or [],
                     "notes": {"root": str(tmp_path / "notes"), "rename_adapter": "filesystem"},
                 }
-            ],
+            },
             "sync": {
                 "pull_preserves_user_metadata": True,
                 "delete_missing_notes": False,
