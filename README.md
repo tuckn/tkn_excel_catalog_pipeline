@@ -77,7 +77,7 @@ sourceFileName: example.xlsx
 
 例示パスを、このリポジトリの実際の保存先へ置き換えて実行します。
 
-```powershell
+```shell
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv tool install .
 tkn-excel-catalog --help
@@ -92,7 +92,7 @@ tkn-excel-catalog --help
 
 ユーザー共通の設定ファイルを作成します。
 
-```powershell
+```shell
 tkn-excel-catalog config init
 ```
 
@@ -104,7 +104,7 @@ tkn-excel-catalog config init
 
 作成した設定をエディタで開きます。
 
-```powershell
+```shell
 notepad "$HOME\.tkn\excel_catalog_pipeline\config.yaml"
 ```
 
@@ -129,7 +129,7 @@ sources:
 
 設定を保存し、入力・出力先が意図した値になっているか確認します。
 
-```powershell
+```shell
 tkn-excel-catalog config show
 ```
 
@@ -145,14 +145,14 @@ tkn-excel-catalog config show
 
 まず、対象と作成予定のノートを確認します。
 
-```powershell
+```shell
 tkn-excel-catalog pull --source personal-excel --dry-run
 ```
 
 新しいブックには `would-create` が表示されます。
 対象パスが正しく、読み取りエラーや競合がなければ通常実行します。
 
-```powershell
+```shell
 tkn-excel-catalog pull --source personal-excel
 ```
 
@@ -177,7 +177,7 @@ tkn-excel-catalog pull --source personal-excel
 
 Excel を保存してから、代理ノートを更新します。
 
-```powershell
+```shell
 tkn-excel-catalog pull --source personal-excel
 ```
 
@@ -190,13 +190,13 @@ tkn-excel-catalog pull --source personal-excel
 代理ノートの Frontmatter を編集し、対象を確認してから反映します。
 以下の `example.xlsx.md` は、実際に作成されたノート名に置き換えます。
 
-```powershell
+```shell
 tkn-excel-catalog push --source personal-excel --note "example.xlsx.md" --dry-run
 ```
 
 `would-write` の対象と差分を確認したら、書き込みます。
 
-```powershell
+```shell
 tkn-excel-catalog push --source personal-excel --note "example.xlsx.md"
 ```
 
@@ -207,7 +207,7 @@ tkn-excel-catalog push --source personal-excel --note "example.xlsx.md"
 
 ### 追跡状況を確認する
 
-```powershell
+```shell
 tkn-excel-catalog status --source personal-excel
 ```
 
@@ -359,7 +359,7 @@ sources:
 競合の内容は、全体オプション `-v` またはレポートの `differences.csv` で確認します。
 Excel を正としてノートをそろえる場合は、次の順で実行します。
 
-```powershell
+```shell
 tkn-excel-catalog -v pull --source personal-excel --prefer-source --dry-run
 tkn-excel-catalog pull --source personal-excel --prefer-source
 ```
@@ -375,7 +375,7 @@ tkn-excel-catalog pull --source personal-excel --prefer-source
 初回の `pull` の必須手順ではありません。
 通常実行はバックアップ後にブックを書き換えるため、ID の付与が目的の場合に実行します。
 
-```powershell
+```shell
 tkn-excel-catalog adopt --source personal-excel --dry-run
 tkn-excel-catalog adopt --source personal-excel
 ```
@@ -517,7 +517,7 @@ Windows、デスクトップ版 Microsoft Excel、インストール・ログイ
 同梱設定のモデルは `gpt-5.6-sol`、推論量は `medium` です。
 実際に利用できるモデルを設定し、画像化用の追加依存を含めてインストールします。
 
-```powershell
+```shell
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv tool install ".[context]" --reinstall
 tkn-excel-catalog context --help
@@ -527,13 +527,13 @@ tkn-excel-catalog context --help
 以下の `example.xlsx` と `Solutions` は、対象ブックの相対パスと実際のシート名に置き換えます。
 まず保存済みのシート一覧を確認します。この操作は読み取り専用です。
 
-```powershell
+```shell
 tkn-excel-catalog context sheets --source personal-excel --workbook "example.xlsx"
 ```
 
 生成前の検証は、次のコマンドで行います。
 
-```powershell
+```shell
 tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --dry-run
 ```
 
@@ -543,7 +543,7 @@ tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx
 
 説明を生成してノートへ追加します。
 
-```powershell
+```shell
 tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions"
 ```
 
@@ -643,13 +643,13 @@ Excel の起動、画像化、AI 呼び出し、`[context]` の追加依存は�
 
 以下のブック・シート名と Markdown パスを実際の値に置き換え、まず検証します。
 
-```powershell
+```shell
 tkn-excel-catalog context import --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --markdown "C:\path\to\Solutions.context.md" --dry-run
 ```
 
 問題がなければ取り込みます。
 
-```powershell
+```shell
 tkn-excel-catalog context import --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --markdown "C:\path\to\Solutions.context.md"
 ```
 
@@ -682,7 +682,7 @@ HTTP(S)、メール、見出しへのリンクは取得せず保持します。
 
 リポジトリの更新後は再インストールし、起動と版を確認します。
 
-```powershell
+```shell
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv tool install . --reinstall
 tkn-excel-catalog --help
@@ -728,7 +728,7 @@ Windows 用の [Convert-XlsToOpenXml.ps1](scripts/Convert-XlsToOpenXml.ps1) は�
 
 リポジトリのフォルダで、入力パスを置き換えて実行します。
 
-```powershell
+```shell
 .\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks" -DryRun
 .\scripts\Convert-XlsToOpenXml.ps1 -SourcePath "C:\path\to\legacy-workbooks"
 ```
@@ -747,7 +747,7 @@ Windows 用の [Convert-XlsToOpenXml.ps1](scripts/Convert-XlsToOpenXml.ps1) は�
 
 開発用依存をそろえ、合成データでテストします。
 
-```powershell
+```shell
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv sync --locked
 uv run pytest
@@ -758,7 +758,7 @@ uv build
 
 コード編集をツール環境へ反映しながら開発する場合は、通常のインストールと別に editable 方式を選べます。
 
-```powershell
+```shell
 uv tool install -e . --reinstall
 ```
 
