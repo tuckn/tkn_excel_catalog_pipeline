@@ -7,6 +7,29 @@ Markdown 側で編集したメタデータを Excel へ戻すこともできま�
 初めて使う場合は、[対象範囲](#対象範囲)から[最初のノートを作成する](#最初のノートを作成する)まで順に進めてください。
 導入後は[日常の更新](#日常の更新)と[コマンド一覧](#コマンド一覧)から必要な操作を探せます。
 
+## 全体の流れ
+
+Excel と Markdown の間で、必要な方向のコマンドを実行します。
+長方形は処理、円筒形は保存データ、矢印はデータの流れを表します。
+
+```mermaid
+flowchart LR
+    Book[("Excel ブック<br/>.xlsx / .xlsm")]
+    Pull["pull<br/>ノートへ反映する"]
+    Note[("代理ノート<br/>Markdown")]
+    Push["push<br/>メタデータを反映する"]
+
+    Book --> Pull
+    Pull --> Note
+    Note --> Push
+    Push --> Book
+```
+
+代理ノートは、元ブックを検索・分類するための Markdown ファイルです。
+`pull` と `push` は利用者が別々に実行します。セルや図形の内容を編集する場所は Excel です。
+シートの説明文も加えたい場合は、任意の [`context build`](#ai-でシートの説明を追加する) で AI 生成するか、[`context import`](#確認済みの-markdown-を取り込む) で確認済みの文章を取り込みます。
+どちらも、`pull` で作成した同じ代理ノートへ説明を追加します。
+
 ## 得られる結果
 
 たとえば、`example.xlsx` に製品比較のシートがある場合、`pull` で `example.xlsx.md` を作成できます。
@@ -37,7 +60,6 @@ sourceFileName: example.xlsx
 
 ノートを Obsidian やテキスト検索で探し、`sourceFullPath` から元の Excel ファイルを確認できます。
 ノート先頭の YAML 領域（Frontmatter）で `subject` や `keywords` を編集し、`push` で Excel のプロパティへ反映できます。
-セルや図形の編集は Excel で行います。
 
 ## 対象範囲
 
@@ -48,7 +70,6 @@ sourceFileName: example.xlsx
 | シートの配置や図形の意味も文章にする | 任意の `context build` | シート画像を使った AI の説明文と、その根拠画像 |
 | 作成・確認済みのシート説明を取り込む | 任意の `context import` | 元の文章を保った説明文と画像のコピー |
 
-ブックに対応して作る Markdown ファイルを、この文書では**代理ノート**と呼びます。
 入力フォルダとノートの保存先を組にした設定が **source** です。
 `--source` には、その組を識別する `sources` のキー（例: `personal-excel`）を指定します。
 
@@ -69,7 +90,8 @@ sourceFileName: example.xlsx
 - 入力にする `.xlsx` / `.xlsm` と、代理ノートを保存するフォルダ。
 - このリポジトリのローカルコピー。
 
-以下の手順は Windows の PowerShell 用です。
+コマンドはターミナルで実行します。パスの例は Windows 用です。
+PowerShell 固有の操作は、その手順で明記します。
 基本の同期処理は Excel COM を使いませんが、この手順では他 OS 上の実動作確認までは扱いません。
 デスクトップ版 Microsoft Excel は、任意の `context build` と旧 `.xls` の変換に必要です。
 
@@ -102,7 +124,7 @@ tkn-excel-catalog config init
 
 ### 入力と出力先を設定する
 
-作成した設定をエディタで開きます。
+作成した設定をエディタで開きます。Windows の PowerShell では、次のように指定できます。
 
 ```shell
 notepad "$HOME\.tkn\excel_catalog_pipeline\config.yaml"
@@ -140,7 +162,10 @@ tkn-excel-catalog config show
 
 ## 最初のノートを作成する
 
-**通常の `pull`、`push`、`adopt` は書き込みを行います。変更せず予定を調べる場合は `--dry-run` を付けます。**
+> [!IMPORTANT]
+> 通常の `pull`、`push`、`adopt` は書き込みを行います。
+> 変更せず予定を調べる場合は `--dry-run` を付けます。
+
 最初は `pull` で代理ノートを作成します。この操作は元の Excel ファイルを変更しません。
 
 まず、対象と作成予定のノートを確認します。
@@ -344,6 +369,46 @@ sources:
 未知の Frontmatter 項目と、マーカー外の手書き本文は保持します。
 旧 `Overview` / `Workbook Path` の移行だけは、[ノート形式の移行](#ノート形式の移行)に従います。
 
+### 比較から反映までの流れ
+
+既存のブックと代理ノートを同期するときのやり取りを示します。
+矢印は読み取り・書き込みなどの要求と応答、枠は実行条件による分岐です。
+実行コマンドの方向へ反映できる変更だけを適用します。
+
+```mermaid
+sequenceDiagram
+    participant App as 同期処理
+    participant Book as Excel ブック
+    participant Proxy as 代理ノート
+    participant State as 同期記録
+    participant Files as バックアップ・レポート
+
+    App->>State: 前回一致した値と対応関係を読む
+    App->>Book: 現在のメタデータを読む
+    App->>Proxy: 現在のメタデータを読む
+    App->>App: 項目ごとに比較し、変更方向と保護条件を確認
+    alt 未解決の競合や保護条件に該当
+        Note over App,Proxy: 該当ブックへの反映を見送り、理由を報告
+    else --dry-run
+        Note over App,Files: 変更予定を表示するだけで、永続ファイルは書かない
+    else 通常実行で反映する変更がある
+        alt pull を実行
+            App->>Proxy: Excel 側の変更を反映
+        else push を実行
+            App->>Files: 更新前のブックをバックアップ
+            App->>Book: メタデータを書き込み、検証
+        end
+        App->>State: 反映後に一致した項目の基準値を記録
+    end
+    opt 通常実行
+        App->>Files: 対象ごとの結果と差分を保存
+    end
+```
+
+初回の `pull` は新しい代理ノートと同期記録を作成します。
+図は名前変更の処理と、書き込み失敗時の復元処理を省略しています。それぞれ[名前変更と移動](#名前変更と移動)、[Excel への書き込みの保護](#excel-への書き込みを保護する仕組み)を参照してください。
+競合や失敗があっても、ほかの対象ですでに成功した変更は残ります。
+
 ### 競合の判定と解決
 
 たとえば前回のタイトルが「製品比較」で、Excel だけを「製品比較 2026」に変えた場合は `pull` の対象です。
@@ -359,12 +424,15 @@ sources:
 競合の内容は、全体オプション `-v` またはレポートの `differences.csv` で確認します。
 Excel を正としてノートをそろえる場合は、次の順で実行します。
 
+> [!WARNING]
+> `pull --prefer-source` は、ノートだけで編集した項目も Excel の値で置き換えます。
+> プレビューで対象と差分を確認してから通常実行してください。
+
 ```shell
 tkn-excel-catalog -v pull --source personal-excel --prefer-source --dry-run
 tkn-excel-catalog pull --source personal-excel --prefer-source
 ```
 
-**`pull --prefer-source` は、ノートだけで編集した項目も Excel の値で置き換えます。**
 通常の `pull` はその編集を保持します。
 ノートを正として競合を解決する場合は、`push --prefer-note` を指定します。
 いずれも対象と差分を確認してから使い、`--prefer-source` と `--prefer-note` は同時に指定しません。
@@ -507,9 +575,9 @@ tkn-excel-catalog adopt --source personal-excel
 既存の代理ノートに、シートごとの説明と画像へのリンクを追加します。
 通常の `pull` から自動実行されることはありません。
 
-**選択シートの情報を、ログイン済みの Codex サービスへ送信します。**
-送信できる内容か確認してから実行してください。
-利用枠や料金はアカウント・契約によって異なり、この CLI は金額を見積もりません。
+> [!IMPORTANT]
+> `context build` は選択シートの画像・文字・位置情報を、ログイン済みの Codex サービスへ送信します。
+> 送信できる内容か確認してから実行してください。利用枠や料金はアカウント・契約によって異なり、この CLI は金額を見積もりません。
 
 ### 準備と実行
 
@@ -557,6 +625,45 @@ tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx
 小さな文字、矢印の接続先、埋め込みオブジェクト、説明のない色などは誤って解釈される場合があります。
 生成指示では原文と推測を区別させますが、結果の正確さを保証するものではありません。
 
+### 生成と再利用の流れ
+
+`context build` が選択したシートを処理する流れです。
+最初に全シートを事前検証し、その後はシートごとに既存の説明・画像・処理記録を確認します。
+
+```mermaid
+sequenceDiagram
+    participant App as シート処理
+    participant Book as 保存済みブック
+    participant Output as 代理ノート・画像・記録
+    participant Excel as Excel の別インスタンス
+    participant AI as Codex CLI・サービス
+
+    App->>Book: 保存済みの内容を取得
+    App->>App: 全選択シートを事前検証
+    loop 選択シートを順番に処理（失敗したら停止）
+        App->>Output: 既存本文・画像・処理記録を確認
+        alt 手動編集などの保護条件に該当
+            Note over App,Output: 既存の説明を変更せず停止
+        else 取り込み済みの説明を保持、または前回結果を再利用
+            Note over App,AI: retained / cached として終了。Excel 起動・AI 呼び出しなし
+        else --dry-run
+            Note over App,AI: 生成予定だけを表示。画像化・AI 呼び出し・保存なし
+        else 生成を実行
+            App->>Excel: 一時コピーの選択シートを描画
+            Excel-->>App: 全体図と詳細画像
+            App->>AI: 選択シートの画像・文字・位置情報を送信
+            AI-->>App: 説明文と使用量
+            App->>App: 応答を検証し、ノートの同時編集を再確認
+            App->>Output: 画像・抽出根拠、対象シートの説明、処理記録を保存
+        end
+    end
+```
+
+図は `--force` を付けない場合の代表的な分岐です。
+`--force` は既存本文の置き換えと再生成を明示する指定ですが、生成中の同時編集は保護します。
+描画や AI 応答の検証に失敗した場合は既存ノートを維持し、先に成功したシートの結果は残します。
+使用量の記録は AI 呼び出し時に行うため、ノートを更新できなかった実行にも残る場合があります。
+
 ### 保存済みの内容と画像化
 
 Excel を開いたままでも、最後に保存された内容を読み取ります。
@@ -597,7 +704,9 @@ PDF とブックのコピーは一時ファイル、PNG と抽出根拠の JSON 
 この場合、Excel の起動も AI 呼び出しもなく、トークン消費は 0 です。
 共有書式の変更は複数シートの再生成につながる場合があります。無関係なセル文字列の変更は通常影響しません。
 
-`--force` は再利用せずに生成し、**指定したシートの管理セクション内の手動編集も置き換えます。**
+> [!WARNING]
+> `context build --force` は前回結果を再利用せず、指定したシートの管理セクション内の手動編集や、取り込み済みの説明も生成文で置き換えます。
+
 通常は手直しや対応する記録の欠落を検出すると既存本文を保護します。
 生成中にノートが編集された場合は、`--force` でも上書きせず停止します。
 
@@ -653,6 +762,38 @@ tkn-excel-catalog context import --source personal-excel --workbook "example.xls
 tkn-excel-catalog context import --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --markdown "C:\path\to\Solutions.context.md"
 ```
 
+### 取り込みの流れと入力条件
+
+取り込み時の出典確認と、既存ノートを更新する順序を示します。
+入力 Markdown と元画像は読み取りだけに使います。
+
+```mermaid
+sequenceDiagram
+    participant App as 取り込み処理
+    participant Input as 入力 Markdown・画像
+    participant Book as 保存済みブック
+    participant Output as 代理ノート・画像・記録
+
+    App->>Book: 保存済みブックとシート情報を読む
+    App->>Input: 本文・出典情報・相対画像を読む
+    App->>App: 入力のブック・シート識別情報を照合
+    App->>Output: 既存の説明と編集状態を確認
+    App->>App: 見出し・画像参照・置き換え条件を検証
+    alt 同じ内容で保存済み画像も正常
+        Note over App,Output: 変更なしで終了
+    else --dry-run
+        Note over App,Output: 取り込み予定だけを表示し、ファイルは書かない
+    else 更新条件を満たす通常実行
+        App->>Output: 更新前の代理ノートをバックアップ
+        App->>Output: 画像をコピーし、出典情報を保存
+        App->>Output: 対象シートの説明と必要な Frontmatter を更新
+        App->>Output: 取り込み内容の保護用記録を保存
+    end
+```
+
+入力や保護条件の検証に失敗した場合は、理由を表示して取り込みを停止します。
+AI による再生成は行わず、取り込む文章の意味や表現を保ちます。
+
 入力は `# タイトル` 形式の H1 が 1 つある Markdown にします。
 H1 は `## <シート名> (sheetId: <id>)`、H2 は H3 というように 1 段下げます。
 入力 H6 は変換できないため拒否します。コードブロックとインラインコードは保持します。
@@ -674,7 +815,7 @@ HTTP(S)、メール、見出しへのリンクは取得せず保持します。
 
 取り込んだ説明はブックが変わっても通常の `context build` で上書きせず、`retained` として保持します。
 その場合の AI 呼び出しとトークン消費は 0 です。
-**`context build --force` は、取り込んだ説明を AI の生成文で置き換えます。**
+AI で作り直す場合の `--force` の影響は、[保存先と手動編集の保護](#保存先と手動編集の保護)を確認してください。
 
 ## 更新と移行
 
