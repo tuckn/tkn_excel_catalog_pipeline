@@ -872,6 +872,8 @@ tkn-excel-catalog --version
 通常の取り込みで変更する Frontmatter は `description`、`sourceFullPath`、`schemaVersion` だけで、それ以外の項目・コメント・日時・ID を保持します。
 対象となったノートだけを移行し、Vault 全体を自動で一括変更しません。
 
+`sourceFullPath` はシングルクォートで囲んで出力します（例: `sourceFullPath: 'C:\path\to\book.xlsx'`）。パス内の `'` は `''` として表記し、パスの値は保持します。
+
 ### 旧 `.xls` を変換する
 
 Windows 用の [Convert-XlsToOpenXml.ps1](scripts/Convert-XlsToOpenXml.ps1) は、デスクトップ版 Excel を使って `.xls` を変換します。

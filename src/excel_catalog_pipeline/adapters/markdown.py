@@ -22,6 +22,7 @@ from ..note_resources import (
     load_note_template,
     managed_blocks,
 )
+from ..note_yaml import SourcePathDumper
 
 WINDOWS_PATH_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
 YAML_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
@@ -32,7 +33,7 @@ class FrontmatterLoader(yaml.SafeLoader):
     """Load plain ISO timestamps as strings so proxy-note values remain stable."""
 
 
-class FrontmatterDumper(yaml.SafeDumper):
+class FrontmatterDumper(SourcePathDumper):
     """Emit ISO timestamp strings without adding YAML quotes."""
 
 

@@ -8,6 +8,10 @@ Git 履歴で独立したバージョン更新を確認できない版は掲載�
 
 ## [Unreleased]
 
+### 修正
+
+- 通常の同期と `context import` で `sourceFullPath` をシングルクォート付きで出力し、パス内のアポストロフィを正しく保持。
+
 ### ドキュメント
 
 - `CHANGELOG.md` を追加。

@@ -199,3 +199,18 @@ def test_unknown_note_profile_is_rejected_when_rendering(tmp_path: Path) -> None
 
     with pytest.raises(NoteError, match="Unknown note profile"):
         render_note(workbook, source)
+
+
+@pytest.mark.parametrize("filename", ["book.xlsx", "O'Brien 日本語.xlsx"])
+def test_source_full_path_stays_single_quoted(tmp_path: Path, filename: str) -> None:
+    workbook_path = create_workbook(tmp_path / filename)
+    source = config(tmp_path)
+    workbook = inspect_workbook(workbook_path, source, max_text_chars=1000)
+    rendered = render_note(workbook, source)
+    expected = "sourceFullPath: '" + str(workbook_path).replace("'", "''") + "'"
+    assert expected in rendered.splitlines()
+    note_path = tmp_path / "rendered.md"
+    note_path.write_text(rendered, encoding="utf-8")
+    note = read_note(note_path)
+    assert note.frontmatter["sourceFullPath"] == str(workbook_path)
+    assert render_note(workbook, source, existing=note, touch_updated=False) == rendered

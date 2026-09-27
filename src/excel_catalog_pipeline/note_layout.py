@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from .note_yaml import SourcePathDumper
+
 PLACEHOLDERS = {
     "Excel metadataから生成したExcel file entityの下書き。",
     "Excel workbookの検索・管理用代理ノート。",
@@ -106,7 +108,9 @@ def patch_frontmatter(text: str, values: dict[str, Any]) -> str:
     additions = []
     for name, value in values.items():
         rendered = (
-            yaml.safe_dump({name: value}, allow_unicode=True, sort_keys=False, width=1000)
+            yaml.dump(
+                {name: value}, Dumper=SourcePathDumper, allow_unicode=True, sort_keys=False, width=1000
+            )
             .rstrip("\n")
             .replace("\n", newline)
         )
