@@ -1,8 +1,11 @@
-# Tkn Excel Catalog Pipeline — Excel を Markdown で検索・整理する
+# tkn-excel-catalog: Tkn Excel Catalog Pipeline — Excel を Markdown で検索・整理する
 
 Excel ブックを元の形式で保ちながら、内容の検索や分類に使う Markdown ノートを作成する CLI です。
 作成されるノートには、`.xlsx` / `.xlsm` のタイトル・作成者などのメタデータ、シート一覧、セルの文字情報、ブック内容の要約が記録されます。
-また、ノート側で編集したメタデータを Excel へ戻すこともできます。
+これにより、ObsidianなどのMarkdown管理システムで、Excelを扱えるようになります。
+
+また、ノート側で編集したメタデータを Excel へ一括して戻すこともできます。
+Excelファイルに対し適切なメタデータを付与することで、Microsoft 365 における SharePoint検索、WorkIQ、Copilotの精度向上が見込めます。
 
 初めて使う場合は、[対象範囲](#対象範囲)から[最初のノートを作成する](#最初のノートを作成する)まで順に進めてください。
 導入後は[日常の更新](#日常の更新)と[コマンド一覧](#コマンド一覧)から必要な操作を探せます。
@@ -19,14 +22,22 @@ flowchart LR
     Pull["pull<br/>ノートへ反映する"]
     Note[("代理ノート<br/>Markdown")]
     Push["push<br/>メタデータを反映する"]
+    State[("同期記録<br/>sync-state.json<br/>対応関係・前回一致値")]
 
     Book --> Pull
     Pull --> Note
     Note --> Push
     Push --> Book
+    State -->|読み取る| Pull
+    State -->|読み取る| Push
+    Pull -->|成功後に更新| State
+    Push -->|成功後に更新| State
 ```
 
 代理ノートは、元ブックを検索・分類するための Markdown ファイルです。
+同期記録は、ブックとノートの対応関係と、項目ごとに前回一致した値を保存するファイルです。Git のような変更履歴ではなく、現在の同期状態を保持します。
+`pull` と `push` はこれを読んで変更方向や競合を判定し、通常実行で反映に成功した項目の状態を更新します。`--dry-run` は読み取りだけです。
+元ブックやノートとともに保全してください。同期記録だけからブックの内容やノートの本文を復元することはできません。
 `pull` と `push` は利用者が別々に実行します。セルや図形の内容を編集する場所は Excel です。
 シートの説明文も加えたい場合は、任意の [`context build`](#ai-でシートの説明を追加する) で AI 生成するか、[`context import`](#確認済みの-markdown-を取り込む) で確認済みの文章を取り込みます。
 どちらも、`pull` で作成した同じ代理ノートへ説明を追加します。
@@ -125,7 +136,8 @@ tkn-excel-catalog pull
 利用条件は[AI でシートの説明を追加する](#ai-でシートの説明を追加する)で確認してください。
 
 主 CLI の対象は `.xlsx` と `.xlsm` です。
-暗号化ブック、`.xls`、`.xlsb`、削除の同期には対応しません。
+暗号化ブック、`.xls`、`.xlsb`、削除の自動同期には対応しません。
+元ブックがなくなった代理ノートは、専用の [`delete-notes`](#元ブックがない代理ノートを削除する) で削除できます。
 セルの文字抽出は検索補助であり、書式・図形・配置を含むブック全体の完全な再現ではありません。
 旧 `.xls` は、[変換用スクリプト](#旧-xls-を変換する)で別途変換できます。
 
@@ -278,6 +290,47 @@ tkn-excel-catalog push --source personal-excel --note "example.xlsx.md"
 `--note` は繰り返し指定でき、ノートのパス・名前、`sourceFileName`、`sourceId` で絞り込めます。
 省略時は、選択した source の全代理ノートが対象です。
 
+### 元ブックがない代理ノートを削除する
+
+`delete-notes` は、元ブックの不存在を確認できた代理ノートと、そのノートに対応する同期記録を削除します。
+通常実行で削除し、`--dry-run` は予定だけを表示します。ノート ID を調べる必要はありません。
+
+ノート名を指定する場合:
+
+```shell
+tkn-excel-catalog delete-notes --source personal-excel --note "example.xlsx.md" --dry-run
+tkn-excel-catalog delete-notes --source personal-excel --note "example.xlsx.md"
+```
+
+元ブックがないノートをまとめて削除する場合:
+
+```shell
+tkn-excel-catalog delete-notes --source personal-excel --all-missing --dry-run
+tkn-excel-catalog delete-notes --source personal-excel --all-missing
+```
+
+`--note` はノートの絶対パス、ノートルートからの相対パス、元ブックの相対パス（`sourceFileName`）、`noteId`、`sourceId` でも指定でき、繰り返し指定できます。
+同名が複数ある場合は相対パスまたは絶対パスで区別してください。各指定が一意に一致しない場合は削除しません。
+`--note` と `--all-missing` はどちらか一方が必須です。`--source` を省略すると全設定 source のノートを対象にします。
+
+個別指定でも、元ブックが存在するノートは削除しません。一括指定ではそれらを対象から外します。
+「ブックと一意に対応しない」という警告だけでは削除せず、記録したパス、ブックの固定 ID、内容の照合情報で存在を確認します。
+移動・リネーム先を見落とさないよう、この確認では全設定 source の入力ルート内のサブフォルダーと除外ファイルも読み取ります。
+ノートの選択範囲には設定の `recursive`、`include`、`ignore` を適用します。
+一括指定では、Frontmatter の `sourceRoot` が別の source を示すノートを `skipped-note` として対象外にします。
+入力ルートの不在、読み取り失敗、辿れないリンク先、同期記録の欠落・曖昧さ、重複ノートなどがあれば、削除開始前にその実行全体を停止します。
+現在のノートと同期記録のノート先が異なる場合、旧パスにも別実体のノートが残っていれば重複として停止します。
+
+削除前に、対象ノートの全文と同期記録を `~/.tkn/excel_catalog_pipeline/state/backups/deleted-notes/<run-id>/` に保存します。
+手書き本文もバックアップに含みます。Excel ブック、添付画像、シート説明の処理記録は削除しません。
+ノートの削除に成功した後で同期記録の該当項目だけを解除するため、次回の `pull` に削除済みノートの `missing-source` が残りません。
+元ブックが後日復元された場合、次回の `pull` は新しい代理ノートを作成します。
+
+削除中の書き込み失敗や通常の中断では、削除済みノートの復元を試みます。同期コマンドを同時に実行せず、結果を確認してください。
+プロセスの強制終了などで復元できなかった場合、バックアップの `manifest.json` に元のノートパス、バックアップ名、同期記録のキーがあります。
+これに従ってノートを戻し、必要ならバックアップの `sync-state.json` から対応する項目を戻します。他の同期を行った後に記録全体を上書きすると、その後の更新を失うため避けてください。
+通常実行の結果にはバックアップと実行レポートの保存先を表示し、標準出力には JSON を1件返します。`--dry-run` はバックアップ・レポートも作成しません。
+
 ### 追跡状況を確認する
 
 ```shell
@@ -310,6 +363,7 @@ tkn-excel-catalog status --source personal-excel
 | Excel からノートへ反映する  | `pull --source <id>`                                                              | [初回実行](#最初のノートを作成する)                    |
 | ノートから Excel へ反映する | `push --source <id> --note <note>`                                                | [日常の更新](#ノート側の変更を-excel-に戻す)           |
 | ブックに固定 ID を付ける    | `adopt --source <id>`                                                             | [名前変更と移動](#名前変更と移動)                      |
+| 元ブックがないノートを削除する | `delete-notes --source <id> --note <note>` または `--all-missing` | [代理ノートの削除](#元ブックがない代理ノートを削除する) |
 | シート名を調べる            | `context sheets --source <id> --workbook <path>`                                  | [AI による説明](#ai-でシートの説明を追加する)          |
 | 選択シートの説明を生成する  | `context build --source <id> --workbook <path> --sheet <name>`                    | [AI による説明](#ai-でシートの説明を追加する)          |
 | 既存の説明を取り込む        | `context import --source <id> --workbook <path> --sheet <name> --markdown <path>` | [Markdown の取り込み](#確認済みの-markdown-を取り込む) |
@@ -545,6 +599,7 @@ tkn-excel-catalog adopt --source personal-excel
 | `pull` / `push` / `adopt` の `--dry-run`   | 同上                                                  | 保存しません。予定・理由・競合を画面で確認します。   |
 | `config show`                                    | 設定ファイルの見出しと、インデント付き JSON           | 保存しません。出力全体は単独の JSON ではありません。 |
 | `config init`、`context` の各コマンド          | 1 件のコンパクトな JSON                               | 設定やシート処理の結果は各節を参照してください。     |
+| `delete-notes` | 1 件のコンパクトな JSON | 通常実行は実行レポートと削除前バックアップ。`--dry-run` は保存しません。 |
 
 `-v` / `--verbose` は Excel・ノート・基準値・予定方向の詳細を表示します。
 `--quiet` は情報ログを抑制し、`--no-color` または環境変数 `NO_COLOR` は色を無効にします。
@@ -559,7 +614,10 @@ tkn-excel-catalog adopt --source personal-excel
 | `created` / `updated`             | ノートを作成・更新しました。                                                           |
 | `would-write` / `written`         | Excel への書き込み予定／書き込みと検証の完了です。                                     |
 | `would-adopt` / `adopted`         | 固定 ID の付与予定／付与の完了です。                                                   |
-| `missing-source`                    | ノートに一意に対応するブックがありません。元ファイルの場所を確認します。               |
+| `missing-source`                    | 元ブックが見つからない、または一意に対応しません。意図的な削除後の整理は [`delete-notes`](#元ブックがない代理ノートを削除する) を使います。 |
+| `would-delete` / `deleted` | 元ブックがない代理ノートと対応する同期記録の削除予定／削除完了です。 |
+| `delete-error` | 存在するブック、曖昧な対応、読み取り・書き込み失敗などにより削除できません。理由とバックアップを確認します。 |
+| `skipped-note` | 一括削除で別の source に属するノートを対象外にしました。 |
 | `missing-note`                      | 追跡済みのノートがありません。`pull` の作成予定を確認します。                        |
 | `pull-required` / `push-required` | 反対方向に未反映の変更があります。該当方向のプレビューで確認します。                   |
 | `conflict`                          | 両側の変更や基準値の欠落で競合しています。[競合の解決](#競合の判定と解決)を参照します。 |
@@ -736,6 +794,8 @@ Windows の共有読み取りを使い、取得中の保存を検出した場合
 Excel 4 マクロシートや、UTF-8 以外のブック・接続情報 XML は画像化できません。
 
 表示中のセル、結合セル、図形から描画範囲を決め、UsedRange や印刷範囲外の図形も対象にします。
+PDF は画像化のための一時形式です。保存済みの印刷範囲をそのまま使わず、描画する領域ごとに一時コピーの印刷範囲を設定し直して Excel から PDF に出力し、PNG に変換します。元ブックの印刷設定は変更しません。
+Excel が必要なのは PDF 形式のためではなく、表示文字列やセル・図形の位置、はみ出す文字の幅を Excel から取得し、その描画結果を使うためです。外部の PDF プリンターだけではブックを解釈・描画できません。別の表計算ソフトによる PDF 化は可能ですが、この CLI は対応しておらず、Excel と同じ画像になる保証もありません。
 詳細画像は一部を重ねて分割し、上から下、同じ高さでは左から右に並べます。
 全体図も付け、必要なら全体図の PDF ページを連結します。
 極端に離れた領域は座標付きの詳細画像にし、詳細領域が想定外に複数ページとなる場合は欠落を避けるため停止します。

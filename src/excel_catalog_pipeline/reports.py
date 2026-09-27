@@ -39,6 +39,8 @@ def summarize_actions(
         "adopted",
         "would-rename",
         "renamed",
+        "would-delete",
+        "deleted",
     }
     changed = sum(action.status in changed_statuses for action in actions)
     summary: dict[str, Any] = {

@@ -16,6 +16,7 @@ from .config import ConfigError, config_as_dict, init_user_config, load_config, 
 from .context import run_context
 from .context_import import import_context
 from .context_source import ContextError
+from .deletion import run_delete_notes
 from .models import Action, SourceConfig
 from .pipeline import run_adopt, run_pull, run_push, run_status
 from .reports import summarize_actions, write_report
@@ -195,6 +196,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_preference(push)
 
+    delete_notes = commands.add_parser(
+        "delete-notes",
+        help="Delete proxy notes only when their workbooks are missing.",
+        description=(
+            "Normal execution backs up and deletes selected missing-source proxy notes and "
+            "removes their synchronization records. Excel files and attachments are preserved. "
+            "Use --dry-run to preview without writing anything."
+        ),
+    )
+    _add_common(delete_notes)
+    deletion_targets = delete_notes.add_mutually_exclusive_group(required=True)
+    deletion_targets.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        help="Select a unique note name/path, sourceFileName, noteId, or sourceId. Repeatable.",
+    )
+    deletion_targets.add_argument(
+        "--all-missing",
+        action="store_true",
+        help="Select all proxy notes whose source workbooks are confirmed missing.",
+    )
+    delete_notes.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview deletion without writing notes, state, backups, or reports.",
+    )
+
     adopt = commands.add_parser(
         "adopt",
         help="Assign stable workbook custom IDs; use --dry-run to preview.",
@@ -355,7 +384,7 @@ def _log_pull_action(logger: logging.Logger, action: Action) -> None:
         logger.warning("[%s] %s", action.status, _one_line(str(warning)))
     if action.status == "unchanged":
         return
-    if action.status in {"created", "updated"}:
+    if action.status in {"created", "updated", "deleted"}:
         level = SUCCESS
     elif action.status.endswith("error"):
         level = logging.ERROR
@@ -655,10 +684,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             for action in actions:
                 _log_adopt_action(logger, action)
+        elif args.command == "delete-notes":
+            write_enabled = not args.dry_run
+            actions, backup_dir = run_delete_notes(
+                config,
+                sources,
+                note_filters=tuple(args.note),
+                all_missing=args.all_missing,
+                dry_run=args.dry_run,
+            )
+            for action in actions:
+                _log_pull_action(logger, action)
         else:
             raise AssertionError(args.command)
         extra = {"backupPath": str(backup_dir) if backup_dir else ""}
-        if args.command in {"pull", "push", "adopt"} and args.dry_run:
+        if args.command in {"pull", "push", "adopt", "delete-notes"} and args.dry_run:
             summary = summarize_actions(
                 args.command,
                 actions,
@@ -681,7 +721,7 @@ def main(argv: list[str] | None = None) -> int:
             _log_status_results(logger, actions, sources)
         result_suffix = (
             "no persistent report was written"
-            if args.command in {"pull", "push", "adopt"} and args.dry_run
+            if args.command in {"pull", "push", "adopt", "delete-notes"} and args.dry_run
             else f"report: {summary['reportPath']}"
         )
         if summary["status"] == "success":
@@ -690,12 +730,16 @@ def main(argv: list[str] | None = None) -> int:
             logger.warning("%s found conflicts; %s", args.command, result_suffix)
         else:
             logger.error("%s failed for one or more targets; %s", args.command, result_suffix)
-        if args.command in {"pull", "push", "adopt"}:
+        if args.command in {"pull", "push", "adopt", "delete-notes"}:
             _log_readable_summary(logger, summary)
+        if args.command == "delete-notes":
+            if backup_dir is not None:
+                logger.info("Deletion backup: %s", backup_dir)
+            _emit(summary)
         return _exit_code(summary)
     except (ConfigError, StateError, ContextError) as exc:
         logger.error("%s", exc)
-        if args.command in {"config", "context"}:
+        if args.command in {"config", "context", "delete-notes"}:
             _emit({"status": "config-error", "command": args.command, "message": str(exc)})
         return 3
     except Exception as exc:  # pragma: no cover - last-resort CLI boundary
@@ -703,6 +747,6 @@ def main(argv: list[str] | None = None) -> int:
             logger.exception("Unexpected failure")
         else:
             logger.error("Unexpected failure: %s", exc)
-        if args.command in {"config", "context"}:
+        if args.command in {"config", "context", "delete-notes"}:
             _emit({"status": "error", "command": args.command, "message": str(exc)})
         return 1
