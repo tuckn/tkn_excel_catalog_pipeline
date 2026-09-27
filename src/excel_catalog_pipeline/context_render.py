@@ -151,7 +151,7 @@ def render_sheet(
         pil_image = importlib.import_module("PIL.Image")
     except ImportError as exc:
         raise ContextError(
-            "Install the context extra: uv tool install '.[context]' --reinstall"
+            "Rendering dependencies are missing; reinstall with uv tool install . --reinstall"
         ) from exc
     output.mkdir(parents=True, exist_ok=True)
     app = workbook = None

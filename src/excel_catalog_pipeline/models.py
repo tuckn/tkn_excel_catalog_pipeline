@@ -66,11 +66,9 @@ class SyncConfig:
 
 @dataclass(frozen=True)
 class ContextConfig:
-    executable: str = "codex"
-    model: str = "gpt-5.6-sol"
-    reasoning_effort: str = "medium"
+    bridge_profile: str = "codex-default"
+    overrides: dict[str, Any] = field(default_factory=dict)
     language: str = "Japanese"
-    timeout_seconds: int = 600
     max_images: int = 24
     tile_width_points: int = 1200
     tile_height_points: int = 800

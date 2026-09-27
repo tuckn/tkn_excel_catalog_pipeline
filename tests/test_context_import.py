@@ -116,6 +116,7 @@ def test_imported_context_retained_by_build_and_pull(setup_import, monkeypatch):
 
     monkeypatch.setattr(context, "render_sheet", forbidden)
     monkeypatch.setattr(context, "generate_markdown", forbidden)
+    monkeypatch.setattr(context, "resolve_profile", forbidden)
     result = context.run_context(
         source,
         ContextConfig(),

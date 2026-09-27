@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from pydantic import TypeAdapter, ValidationError
+from tkn_genai_bridge import Profile
 
 from .models import AppConfig, ContextConfig, FrontmatterTermFormat, SourceConfig, SyncConfig
 from .note_resources import NoteResourceError, load_note_template
@@ -143,6 +145,48 @@ def init_user_config(*, force: bool = False, target: Path | None = None) -> tupl
     return status, destination
 
 
+def _context_settings(raw: dict[str, Any]) -> dict[str, Any]:
+    """Translate explicit legacy options per layer; never rewrite a user file."""
+    values = deepcopy(raw)
+    overrides = values.get("overrides", {})
+    if not isinstance(overrides, dict):
+        raise ConfigError("context.overrides must be a mapping")
+    for name in ("executable", "model", "reasoning_effort", "timeout_seconds"):
+        if name not in values:
+            continue
+        value = values.pop(name)
+        if name == "timeout_seconds":
+            if type(value) is not int or not 0 < value <= 86400:
+                raise ConfigError("context.timeout_seconds must be an integer between 1 and 86400")
+        elif not isinstance(value, str) or not value.strip():
+            raise ConfigError(f"context.{name} must be a non-empty string")
+        if name == "reasoning_effort" and value not in {
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra",
+        }:
+            raise ConfigError("context.reasoning_effort is unsupported")
+        key = "cli" if name == "executable" else name
+        if key in overrides:
+            raise ConfigError(f"Do not mix context.{name} with context.overrides.{key}")
+        overrides[key] = {"executable": value} if name == "executable" else value
+    for key, value in overrides.items():
+        field = Profile.model_fields.get(key)
+        if field is None:
+            raise ConfigError(f"Unknown context.overrides key: {key}")
+        try:
+            TypeAdapter(field.rebuild_annotation()).validate_python(value, strict=True)
+        except ValidationError:
+            raise ConfigError(f"Invalid context.overrides.{key}") from None
+    values["overrides"] = overrides
+    return values
+
+
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(base)
     for key, value in overlay.items():
@@ -187,7 +231,10 @@ def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> App
     loaded: list[Path] = []
     for path in candidates:
         if path.exists():
-            merged = _deep_merge(merged, _read_yaml(path))
+            layer = _read_yaml(path)
+            if isinstance(layer.get("context"), dict):
+                layer["context"] = _context_settings(layer["context"])
+            merged = _deep_merge(merged, layer)
             loaded.append(path)
         elif explicit is not None and path == explicit.expanduser().resolve():
             raise ConfigError(f"Explicit config not found: {path}")
@@ -273,18 +320,19 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
     context_raw = data.get("context", {})
     if not isinstance(context_raw, dict):
         raise ConfigError("context must be a mapping")
+    context_raw = _context_settings(context_raw)
     defaults = asdict(ContextConfig())
     _reject_unknown(context_raw, set(defaults), "context")
     context_values = {**defaults, **context_raw}
     for name, default in defaults.items():
         value = context_values[name]
+        if name == "overrides":
+            continue
         if isinstance(default, int):
             if type(value) is not int or value <= 0:
                 raise ConfigError(f"context.{name} must be a positive integer")
         elif not isinstance(value, str) or not value.strip():
             raise ConfigError(f"context.{name} must be a non-empty string")
-    if context_values["reasoning_effort"] not in {"low", "medium", "high", "xhigh"}:
-        raise ConfigError("context.reasoning_effort must be low, medium, high or xhigh")
     if context_values["overlap_points"] * 2 >= min(
         context_values["tile_width_points"], context_values["tile_height_points"]
     ):

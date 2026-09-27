@@ -206,7 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(adopt)
     _add_execution_mode(adopt, legacy_write_option="--write-excel")
     context = commands.add_parser(
-        "context", help="Extract visual sheet context with Codex; never run by pull."
+        "context", help="Extract visual sheet context through GenAI Bridge; never run by pull."
     )
     context_commands = context.add_subparsers(dest="context_command", required=True)
     for name, help_text in (

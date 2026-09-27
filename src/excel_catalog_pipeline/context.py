@@ -18,13 +18,16 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from tkn_genai_bridge import Profile
+
 from .adapters.markdown import discover_notes
 from .adapters.ooxml import read_custom_properties
 from .context_provider import (
     PROMPT_VERSION,
     atomic_json,
     generate_markdown,
-    resolve_executable,
+    generation_plan,
+    resolve_profile,
     utc_now,
 )
 from .context_render import render_sheet
@@ -194,6 +197,8 @@ def build_context(
     )
 
     def run() -> None:
+        connection: Profile | None = None
+        plan: dict[str, Any] = {}
         for sheet, evidence in zip(selected, prepared, strict=True):
             result: dict[str, Any] = {"sheet": sheet["name"], "notePath": str(note)}
             results.append(result)
@@ -202,16 +207,6 @@ def build_context(
             old_block = existing_block(text, sheet["id"])
             state_path = state_dir / f"sheet-{sheet['id']}.json"
             state = _read_state(state_path)
-            key = digest(
-                json.dumps(
-                    {
-                        "sheet": evidence["fingerprint"],
-                        "config": asdict(config),
-                        "promptVersion": PROMPT_VERSION,
-                    },
-                    sort_keys=True,
-                ).encode()
-            )
             if (
                 old_block
                 and digest(old_block.replace("\r\n", "\n").encode()) != state.get("blockSha256")
@@ -231,6 +226,32 @@ def build_context(
                     sheet["name"],
                 )
                 continue
+            if connection is None:
+                connection = resolve_profile(config)
+                plan = generation_plan(connection)
+            result["bridgePlan"] = plan
+            key = digest(
+                json.dumps(
+                    {
+                        "sheet": evidence["fingerprint"],
+                        "config": {
+                            k: v
+                            for k, v in asdict(config).items()
+                            if k not in {"bridge_profile", "overrides"}
+                        },
+                        "bridge": {
+                            k: plan[k]
+                            for k in (
+                                "bridge_version",
+                                "generation_settings_sha256",
+                                "schema_sha256",
+                            )
+                        },
+                        "promptVersion": PROMPT_VERSION,
+                    },
+                    sort_keys=True,
+                ).encode()
+            )
             if (
                 not force
                 and old_block
@@ -249,7 +270,7 @@ def build_context(
                     sheet["name"],
                 )
                 continue
-            resolve_executable(config)
+            generation_plan(connection, check_executable=True)
             with tempfile.TemporaryDirectory(prefix="excel-catalog-context-") as temporary:
                 working = Path(temporary).resolve()
                 snapshot = working / ("snapshot" + workbook.suffix)
@@ -271,9 +292,9 @@ def build_context(
                     config,
                     evidence,
                     [images_dir / image["image"] for image in images],
-                    working,
                     usage_path,
                     logger,
+                    profile=connection,
                     on_usage=records.append,
                 )
                 markdown = markdown.replace("\r\n", "\n")
@@ -289,7 +310,7 @@ def build_context(
                     f"## {heading} (sheetId: {sheet['id']})\n\n{markdown}\n\n"
                     f"### Source images\n\n{links}\n\n"
                     f"<!-- Saved-file snapshot SHA256: {digest(data)}; generated: {utc_now()}; "
-                    f"model: {config.model}; prompt: {PROMPT_VERSION} -->\n"
+                    f"provider: {plan['provider']}; requested model: {plan['model'] or 'provider default'}; prompt: {PROMPT_VERSION} -->\n"
                     f"<!-- excel-catalog:end context-{sheet['id']} -->"
                 )
                 block_hash = digest(block.encode())

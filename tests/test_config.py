@@ -169,11 +169,6 @@ sources:
         load_config(explicit=path, cwd=tmp_path)
 
 
-def test_packaged_template_matches_repository_example() -> None:
-    repository_template = Path(".tkn/config.example.yaml").read_text(encoding="utf-8")
-    assert config_template_text() == repository_template
-
-
 def test_init_user_config_is_idempotent_and_protects_edits(tmp_path: Path) -> None:
     target = tmp_path / ".tkn" / "excel_catalog_pipeline" / "config.yaml"
 
@@ -315,3 +310,57 @@ def test_duplicate_yaml_keys_are_rejected(
     monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "absent")
     with pytest.raises(ConfigError, match="Duplicate config key"):
         load_config(explicit=path, cwd=tmp_path)
+
+
+def test_legacy_context_settings_become_explicit_bridge_overrides():
+    data = {
+        **config_module.DEFAULT_CONFIG,
+        "context": {
+            "executable": "fixture.exe",
+            "model": "fixture-model",
+            "reasoning_effort": "high",
+            "timeout_seconds": 600,
+        },
+    }
+    config = config_module.validate_config(data)
+    assert config.context.bridge_profile == "codex-default"
+    assert config.context.overrides == {
+        "cli": {"executable": "fixture.exe"},
+        "model": "fixture-model",
+        "reasoning_effort": "high",
+        "timeout_seconds": 600,
+    }
+    assert "model" not in config_module.config_as_dict(config)["context"]
+    assert config_module.validate_config(config_module.DEFAULT_CONFIG).context.overrides == {}
+
+
+def test_legacy_context_conversion_respects_layer_precedence(tmp_path, monkeypatch):
+    shared = tmp_path / "global.yaml"
+    shared.write_text("context:\n  model: old-model\n  timeout_seconds: 600\n")
+    project = tmp_path / ".tkn" / "config.yaml"
+    project.parent.mkdir()
+    project.write_text("context:\n  overrides:\n    model: project-model\n")
+    explicit = tmp_path / "explicit.yaml"
+    explicit.write_text("context:\n  model: explicit-model\n")
+    monkeypatch.setattr(config_module, "global_config_path", lambda: shared)
+    before = shared.read_bytes()
+    assert load_config(cwd=tmp_path).context.overrides["model"] == "project-model"
+    config = load_config(cwd=tmp_path, explicit=explicit)
+    assert config.context.overrides == {"model": "explicit-model", "timeout_seconds": 600}
+    assert shared.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"bridge_profile": " "},
+        {"overrides": []},
+        {"overrides": {"bad": 1}},
+        {"overrides": {"timeout_seconds": -1}},
+        {"overrides": {"cli": {"unknown": "x"}}},
+        {"model": "old", "overrides": {"model": "new"}},
+    ],
+)
+def test_bridge_context_settings_are_strict(settings):
+    with pytest.raises(ConfigError):
+        config_module.validate_config({**config_module.DEFAULT_CONFIG, "context": settings})

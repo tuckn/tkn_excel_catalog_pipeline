@@ -1,8 +1,8 @@
-# Excel Catalog Pipeline — Excel を Markdown で検索・整理する
+# Tkn Excel Catalog Pipeline — Excel を Markdown で検索・整理する
 
 Excel ブックを元の形式で保ちながら、内容の検索や分類に使う Markdown ノートを作成する CLI です。
-`.xlsx` / `.xlsm` からタイトル・作成者などのメタデータ、シート一覧、セルの文字情報を取り出します。
-Markdown 側で編集したメタデータを Excel へ戻すこともできます。
+作成されるノートには、`.xlsx` / `.xlsm` のタイトル・作成者などのメタデータ、シート一覧、セルの文字情報、ブック内容の要約が記録されます。
+また、ノート側で編集したメタデータを Excel へ戻すこともできます。
 
 初めて使う場合は、[対象範囲](#対象範囲)から[最初のノートを作成する](#最初のノートを作成する)まで順に進めてください。
 導入後は[日常の更新](#日常の更新)と[コマンド一覧](#コマンド一覧)から必要な操作を探せます。
@@ -10,7 +10,8 @@ Markdown 側で編集したメタデータを Excel へ戻すこともできま�
 ## 全体の流れ
 
 Excel と Markdown の間で、必要な方向のコマンドを実行します。
-長方形は処理、円筒形は保存データ、矢印はデータの流れを表します。
+
+概要図を以下に示します。長方形は処理、円筒形は保存データ、矢印はデータの流れを表します。
 
 ```mermaid
 flowchart LR
@@ -63,18 +64,18 @@ sourceFileName: example.xlsx
 
 ## 対象範囲
 
-| 目的 | 操作 | 得られるもの・変更対象 |
-| --- | --- | --- |
-| Excel を検索・分類する | `pull` | メタデータ、シート一覧、抽出文字を含む Markdown ノート |
-| ノートで整理したメタデータを Excel に戻す | `push` | Excel のプロパティ更新とバックアップ |
-| シートの配置や図形の意味も文章にする | 任意の `context build` | シート画像を使った AI の説明文と、その根拠画像 |
-| 作成・確認済みのシート説明を取り込む | 任意の `context import` | 元の文章を保った説明文と画像のコピー |
+| 目的                                      | 操作                     | 得られるもの・変更対象                                 |
+| ----------------------------------------- | ------------------------ | ------------------------------------------------------ |
+| Excel を検索・分類する                    | `pull`                 | メタデータ、シート一覧、抽出文字を含む Markdown ノート |
+| ノートで整理したメタデータを Excel に戻す | `push`                 | Excel のプロパティ更新とバックアップ                   |
+| シートの配置や図形の意味も文章にする      | 任意の`context build`  | シート画像を使った AI の説明文と、その根拠画像         |
+| 作成・確認済みのシート説明を取り込む      | 任意の`context import` | 元の文章を保った説明文と画像のコピー                   |
 
 入力フォルダとノートの保存先を組にした設定が **source** です。
 `--source` には、その組を識別する `sources` のキー（例: `personal-excel`）を指定します。
 
 通常の同期はローカルで完結し、Excel 本体や Obsidian の起動、認証、ネットワーク通信、生成 AI を必要としません。
-`context build` は選択シートの情報を Codex サービスへ送信します。
+`context build` は選択シートの情報を、GenAI Bridge の共有プロファイルで選んだ接続先へ送信します。
 利用条件は[AI でシートの説明を追加する](#ai-でシートの説明を追加する)で確認してください。
 
 主 CLI の対象は `.xlsx` と `.xlsm` です。
@@ -106,6 +107,7 @@ tkn-excel-catalog --help
 ```
 
 ヘルプが表示されれば、CLI の起動を確認できています。
+Windows では、シート画像化に必要な Python 依存関係も通常のインストールに含まれます。
 通常のインストールは、その時点のコードと同梱ファイルを `uv` のツール環境へ格納します。
 リポジトリを編集しただけではインストール済み CLI に反映されません。
 更新時の操作は[更新と移行](#更新と移行)を参照してください。
@@ -254,17 +256,17 @@ tkn-excel-catalog status --source personal-excel
 
 ## コマンド一覧
 
-| 目的 | コマンド・主な引数 | 詳細 |
-| --- | --- | --- |
-| 共通設定を作る | `config init` | [設定ファイルの作成](#設定ファイルを作成する) |
-| 有効な設定を読む | `config show` | [設定の優先順位](#設定の優先順位) |
-| 追跡状況を調べる | `status --source <id>` | [追跡状況](#追跡状況を確認する) |
-| Excel からノートへ反映する | `pull --source <id>` | [初回実行](#最初のノートを作成する) |
-| ノートから Excel へ反映する | `push --source <id> --note <note>` | [日常の更新](#ノート側の変更を-excel-に戻す) |
-| ブックに固定 ID を付ける | `adopt --source <id>` | [名前変更と移動](#名前変更と移動) |
-| シート名を調べる | `context sheets --source <id> --workbook <path>` | [AI による説明](#ai-でシートの説明を追加する) |
-| 選択シートの説明を生成する | `context build --source <id> --workbook <path> --sheet <name>` | [AI による説明](#ai-でシートの説明を追加する) |
-| 既存の説明を取り込む | `context import --source <id> --workbook <path> --sheet <name> --markdown <path>` | [Markdown の取り込み](#確認済みの-markdown-を取り込む) |
+| 目的                        | コマンド・主な引数                                                                  | 詳細                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| 共通設定を作る              | `config init`                                                                     | [設定ファイルの作成](#設定ファイルを作成する)          |
+| 有効な設定を読む            | `config show`                                                                     | [設定の優先順位](#設定の優先順位)                      |
+| 追跡状況を調べる            | `status --source <id>`                                                            | [追跡状況](#追跡状況を確認する)                        |
+| Excel からノートへ反映する  | `pull --source <id>`                                                              | [初回実行](#最初のノートを作成する)                    |
+| ノートから Excel へ反映する | `push --source <id> --note <note>`                                                | [日常の更新](#ノート側の変更を-excel-に戻す)           |
+| ブックに固定 ID を付ける    | `adopt --source <id>`                                                             | [名前変更と移動](#名前変更と移動)                      |
+| シート名を調べる            | `context sheets --source <id> --workbook <path>`                                  | [AI による説明](#ai-でシートの説明を追加する)          |
+| 選択シートの説明を生成する  | `context build --source <id> --workbook <path> --sheet <name>`                    | [AI による説明](#ai-でシートの説明を追加する)          |
+| 既存の説明を取り込む        | `context import --source <id> --workbook <path> --sheet <name> --markdown <path>` | [Markdown の取り込み](#確認済みの-markdown-を取り込む) |
 
 全体のオプションはサブコマンドの前に置きます。
 たとえば詳細表示は `tkn-excel-catalog -v pull --dry-run`、設定の指定は `tkn-excel-catalog --config "C:\path\to\config.yaml" config show` です。
@@ -288,20 +290,20 @@ tkn-excel-catalog status --source personal-excel
 
 ### 探索範囲の設定
 
-| 設定 | 意味・省略時の動作 |
-| --- | --- |
-| `schema_version` | 設定形式の版。`1` を指定します。 |
-| `sources.<id>` | キーが source の一意なIDです。継続利用中は安定した名前を使います。 |
-| `sources.<id>.id` | 省略または `null` を推奨。指定する場合はキーと同じ文字列にします。 |
-| `sources.<id>.path` | 必須。入力ブックのルートフォルダです。 |
-| `sources.<id>.recursive` | 既定は `false`。`true` でサブフォルダも探索します。 |
-| `sources.<id>.include` | 既定は `["*.xlsx", "*.xlsm"]`。対象のパターンです。空リストは指定できません。 |
-| `sources.<id>.ignore` | 既定は `[]`。入力ルートからの相対パスに適用する除外パターンです。 |
-| `sources.<id>.notes.root` | 必須。`pull` の出力先であり、`push` の入力元です。 |
-| `sources.<id>.notes.profile` | 既定は `tkn-obsidian-v1`。同梱のノート形式を使います。 |
-| `sources.<id>.notes.frontmatter_term_format` | 既定は `obsidian-link`。`keywords` と `categories` を `[[用語]]` にします。`plain` は通常の文字列です。 |
-| `sources.<id>.notes.rename_adapter` | 既定は `report-only`。`filesystem` でファイルの直接移動を許可します。[名前変更と移動](#名前変更と移動)を参照してください。 |
-| `sync.max_extracted_text_chars` | 既定は `12000`。1 ブックから抽出する検索用文字情報の最大文字数です。正の整数を指定します。 |
+| 設定                                           | 意味・省略時の動作                                                                                                           |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`                             | 設定形式の版。`1` を指定します。                                                                                           |
+| `sources.<id>`                               | キーが source の一意なIDです。継続利用中は安定した名前を使います。                                                           |
+| `sources.<id>.id`                            | 省略または`null` を推奨。指定する場合はキーと同じ文字列にします。                                                          |
+| `sources.<id>.path`                          | 必須。入力ブックのルートフォルダです。                                                                                       |
+| `sources.<id>.recursive`                     | 既定は`false`。`true` でサブフォルダも探索します。                                                                       |
+| `sources.<id>.include`                       | 既定は`["*.xlsx", "*.xlsm"]`。対象のパターンです。空リストは指定できません。                                               |
+| `sources.<id>.ignore`                        | 既定は`[]`。入力ルートからの相対パスに適用する除外パターンです。                                                           |
+| `sources.<id>.notes.root`                    | 必須。`pull` の出力先であり、`push` の入力元です。                                                                       |
+| `sources.<id>.notes.profile`                 | 既定は`tkn-obsidian-v1`。同梱のノート形式を使います。                                                                      |
+| `sources.<id>.notes.frontmatter_term_format` | 既定は`obsidian-link`。`keywords` と `categories` を `[[用語]]` にします。`plain` は通常の文字列です。             |
+| `sources.<id>.notes.rename_adapter`          | 既定は`report-only`。`filesystem` でファイルの直接移動を許可します。[名前変更と移動](#名前変更と移動)を参照してください。 |
+| `sync.max_extracted_text_chars`              | 既定は`12000`。1 ブックから抽出する検索用文字情報の最大文字数です。正の整数を指定します。                                  |
 
 `sources` が空のままでは同期を実行できません。
 配列は順序のある一覧、オブジェクト（YAML の mapping）は一意な名前と設定の対応表です。
@@ -345,20 +347,20 @@ sources:
 
 ### メタデータの対応
 
-| 代理ノートの項目 | Excel 側の値・用途 |
-| --- | --- |
-| `title` | タイトル（Title） |
-| `subject` | 件名（Subject） |
-| `author` | 作成者（Author / creator）。単一文字列です。 |
-| `keywords[]` | キーワード（Keywords / tags） |
-| `categories[]` | 分類（Category） |
-| `comments` | コメント（Comments / description） |
-| `sourceCreated` | Excel の作成日時。`pull` だけで更新します。 |
-| `sourceModified` | Excel の更新日時。`pull` だけで更新します。 |
+| 代理ノートの項目   | Excel 側の値・用途                                                   |
+| ------------------ | -------------------------------------------------------------------- |
+| `title`          | タイトル（Title）                                                    |
+| `subject`        | 件名（Subject）                                                      |
+| `author`         | 作成者（Author / creator）。単一文字列です。                         |
+| `keywords[]`     | キーワード（Keywords / tags）                                        |
+| `categories[]`   | 分類（Category）                                                     |
+| `comments`       | コメント（Comments / description）                                   |
+| `sourceCreated`  | Excel の作成日時。`pull` だけで更新します。                        |
+| `sourceModified` | Excel の更新日時。`pull` だけで更新します。                        |
 | `sourceFileName` | 入力ルートからの相対パス。編集すると名前変更・移動の要求になります。 |
-| `sourceFullPath` | 元ブックの絶対パス。名前変更の要求には使いません。 |
-| `description` | 代理ノート全体の概要。Excel には反映しません。 |
-| `schemaVersion` | 代理ノートの形式の版。現在は文字列 `"2.1"` です。 |
+| `sourceFullPath` | 元ブックの絶対パス。名前変更の要求には使いません。                   |
+| `description`    | 代理ノート全体の概要。Excel には反映しません。                       |
+| `schemaVersion`  | 代理ノートの形式の版。現在は文字列`"2.1"` です。                   |
 
 `keywords` と `categories` は、Excel へ戻すときに Obsidian のリンク記法を外し、`; ` で結合します。
 カンマは用語の一部として保持します。
@@ -450,10 +452,10 @@ tkn-excel-catalog adopt --source personal-excel
 
 名前変更・移動には、次の 2 方向があります。
 
-| 先に変更する場所 | CLI が変更する対象 | 必要な指定 |
-| --- | --- | --- |
-| エクスプローラーなどで元ブックを移動する | 代理ノートを元ブックの相対パスへ追従させる | `rename_adapter: filesystem` と通常の `pull` |
-| ノートの `sourceFileName` を編集する | 元ブックと代理ノートを移動する | `rename_adapter: filesystem` と通常の `push --allow-rename` |
+| 先に変更する場所                         | CLI が変更する対象                         | 必要な指定                                                      |
+| ---------------------------------------- | ------------------------------------------ | --------------------------------------------------------------- |
+| エクスプローラーなどで元ブックを移動する | 代理ノートを元ブックの相対パスへ追従させる | `rename_adapter: filesystem` と通常の `pull`                |
+| ノートの`sourceFileName` を編集する    | 元ブックと代理ノートを移動する             | `rename_adapter: filesystem` と通常の `push --allow-rename` |
 
 既定の `report-only` はパスを変更せず、必要な移動を `rename-required` として報告します。
 `filesystem` の設定だけでは移動せず、対応するコマンドの通常実行が必要です。
@@ -489,12 +491,12 @@ tkn-excel-catalog adopt --source personal-excel
 
 標準出力の形式はコマンドで異なります。
 
-| コマンド | 標準出力 | 保存される実行結果 |
-| --- | --- | --- |
-| `status`、通常の `pull` / `push` / `adopt` | JSON を出しません。画面用の結果は標準エラー出力です。 | 実行レポート |
-| `pull` / `push` / `adopt` の `--dry-run` | 同上 | 保存しません。予定・理由・競合を画面で確認します。 |
-| `config show` | 設定ファイルの見出しと、インデント付き JSON | 保存しません。出力全体は単独の JSON ではありません。 |
-| `config init`、`context` の各コマンド | 1 件のコンパクトな JSON | 設定やシート処理の結果は各節を参照してください。 |
+| コマンド                                           | 標準出力                                              | 保存される実行結果                                   |
+| -------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| `status`、通常の `pull` / `push` / `adopt` | JSON を出しません。画面用の結果は標準エラー出力です。 | 実行レポート                                         |
+| `pull` / `push` / `adopt` の `--dry-run`   | 同上                                                  | 保存しません。予定・理由・競合を画面で確認します。   |
+| `config show`                                    | 設定ファイルの見出しと、インデント付き JSON           | 保存しません。出力全体は単独の JSON ではありません。 |
+| `config init`、`context` の各コマンド          | 1 件のコンパクトな JSON                               | 設定やシート処理の結果は各節を参照してください。     |
 
 `-v` / `--verbose` は Excel・ノート・基準値・予定方向の詳細を表示します。
 `--quiet` は情報ログを抑制し、`--no-color` または環境変数 `NO_COLOR` は色を無効にします。
@@ -502,21 +504,21 @@ tkn-excel-catalog adopt --source personal-excel
 
 ### 状態と次の操作
 
-| 状態 | 意味・次の操作 |
-| --- | --- |
-| `unchanged` | 同期対象の差分がありません。 |
-| `would-create` / `would-update` | `pull --dry-run` でのノート作成・更新予定です。対象を確認して通常実行します。 |
-| `created` / `updated` | ノートを作成・更新しました。 |
-| `would-write` / `written` | Excel への書き込み予定／書き込みと検証の完了です。 |
-| `would-adopt` / `adopted` | 固定 ID の付与予定／付与の完了です。 |
-| `missing-source` | ノートに一意に対応するブックがありません。元ファイルの場所を確認します。 |
-| `missing-note` | 追跡済みのノートがありません。`pull` の作成予定を確認します。 |
-| `pull-required` / `push-required` | 反対方向に未反映の変更があります。該当方向のプレビューで確認します。 |
-| `conflict` | 両側の変更や基準値の欠落で競合しています。[競合の解決](#競合の判定と解決)を参照します。 |
-| `duplicate-id` | 複数のブックに同じ固定 ID があります。対応付けを確認します。 |
-| `rename-required` | 名前変更・移動に必要な設定や許可を確認します。 |
-| `rename-error` | 移動先の名前、衝突、ファイル操作の失敗を確認します。 |
-| `read-error` / `write-error` | 読み取り／書き込み・事後検証に失敗しました。表示理由とバックアップを確認します。 |
+| 状態                                  | 意味・次の操作                                                                         |
+| ------------------------------------- | -------------------------------------------------------------------------------------- |
+| `unchanged`                         | 同期対象の差分がありません。                                                           |
+| `would-create` / `would-update`   | `pull --dry-run` でのノート作成・更新予定です。対象を確認して通常実行します。        |
+| `created` / `updated`             | ノートを作成・更新しました。                                                           |
+| `would-write` / `written`         | Excel への書き込み予定／書き込みと検証の完了です。                                     |
+| `would-adopt` / `adopted`         | 固定 ID の付与予定／付与の完了です。                                                   |
+| `missing-source`                    | ノートに一意に対応するブックがありません。元ファイルの場所を確認します。               |
+| `missing-note`                      | 追跡済みのノートがありません。`pull` の作成予定を確認します。                        |
+| `pull-required` / `push-required` | 反対方向に未反映の変更があります。該当方向のプレビューで確認します。                   |
+| `conflict`                          | 両側の変更や基準値の欠落で競合しています。[競合の解決](#競合の判定と解決)を参照します。 |
+| `duplicate-id`                      | 複数のブックに同じ固定 ID があります。対応付けを確認します。                           |
+| `rename-required`                   | 名前変更・移動に必要な設定や許可を確認します。                                         |
+| `rename-error`                      | 移動先の名前、衝突、ファイル操作の失敗を確認します。                                   |
+| `read-error` / `write-error`      | 読み取り／書き込み・事後検証に失敗しました。表示理由とバックアップを確認します。       |
 
 終了コードは、通常 `0` が成功、`1` が実行・検証・部分的な書き込みエラー、`2` が未解決の競合、`3` が設定・対象選択などのエラーです。
 引数の構文エラーも引数解析処理が `2` を返すため、画面のメッセージと合わせて判断します。
@@ -536,12 +538,12 @@ tkn-excel-catalog adopt --source personal-excel
   differences.csv
 ```
 
-| ファイル | 確認できること |
-| --- | --- |
-| `summary.json` | 全体の状態、変更・競合・エラー件数、状態別件数 |
-| `actions.csv` | ファイルごとの結果、対象パス、変更項目、理由 |
-| `details.json` | ファイルごとの詳細情報 |
-| `differences.csv` | 項目ごとの前回一致値 `baseValue`、Excel 値 `excelValue`、ノート値 `noteValue`、変更方向 |
+| ファイル            | 確認できること                                                                               |
+| ------------------- | -------------------------------------------------------------------------------------------- |
+| `summary.json`    | 全体の状態、変更・競合・エラー件数、状態別件数                                               |
+| `actions.csv`     | ファイルごとの結果、対象パス、変更項目、理由                                                 |
+| `details.json`    | ファイルごとの詳細情報                                                                       |
+| `differences.csv` | 項目ごとの前回一致値`baseValue`、Excel 値 `excelValue`、ノート値 `noteValue`、変更方向 |
 
 `sourceToNoteFields` は Excel からノート、`noteToSourceFields` はノートから Excel への変更項目です。
 `changedFields` は、そのコマンドで反映した、または反映予定の項目です。
@@ -554,42 +556,53 @@ tkn-excel-catalog adopt --source personal-excel
 
 継続利用するデータは、次のように扱います。
 
-| 保存領域 | 内容・失った場合の影響 |
-| --- | --- |
-| 入力の `path` | 元の Excel ブックです。代理ノートだけでは元の内容を復元できません。 |
-| `notes.root` | 代理ノートと、シート説明の画像です。手書き本文や取り込み済みの説明を含むため、元ブックと別に保持します。 |
-| `~/.tkn/excel_catalog_pipeline/config.yaml` | 入出力先などの設定です。移行時は設定を引き継いでパスを確認します。 |
-| `state/sync-state.json` | ブック・ノートの対応と前回一致値です。失うと、既存の差分を競合として扱うことがあります。手編集や安易な削除を避けてください。 |
-| `state/backups/` | Excel 更新前のバックアップです。過去の内容への復旧に使います。 |
-| `state/runs/` | 各実行のレポートです。削除するとその実行の調査記録を失います。 |
-| `state/context/` | シート説明の保護・再利用用の記録、取り込み時のバックアップ、使用量の記録です。欠落時は既存の説明の置き換えを保護することがあります。 |
+| 保存領域                                      | 内容・失った場合の影響                                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 入力の`path`                                | 元の Excel ブックです。代理ノートだけでは元の内容を復元できません。                                                                  |
+| `notes.root`                                | 代理ノートと、シート説明の画像です。手書き本文や取り込み済みの説明を含むため、元ブックと別に保持します。                             |
+| `~/.tkn/excel_catalog_pipeline/config.yaml` | 入出力先などの設定です。移行時は設定を引き継いでパスを確認します。                                                                   |
+| `state/sync-state.json`                     | ブック・ノートの対応と前回一致値です。失うと、既存の差分を競合として扱うことがあります。手編集や安易な削除を避けてください。         |
+| `state/backups/`                            | Excel 更新前のバックアップです。過去の内容への復旧に使います。                                                                       |
+| `state/runs/`                               | 各実行のレポートです。削除するとその実行の調査記録を失います。                                                                       |
+| `state/context/`                            | シート説明の保護・再利用用の記録、取り込み時のバックアップ、使用量の記録です。欠落時は既存の説明の置き換えを保護することがあります。 |
 
 上表の `state/` は `~/.tkn/excel_catalog_pipeline/state/` です。
 環境を移す場合は、元ブック、ノートと画像、設定、同期・シート処理の記録を一緒に保全してください。
 ノートには元ファイルの絶対パスや抽出した本文が入り、レポートにもパスやメタデータが入ります。
 実データを含む生成物を公開リポジトリへ追加しないでください。
 
-## AI でシートの説明を追加する
+## シートの内容をAI解析してノートに追加する
 
-`context build` は、Excel の描画画像とセル・図形の文字・位置情報から、シートの説明を作成します。
-既存の代理ノートに、シートごとの説明と画像へのリンクを追加します。
-通常の `pull` から自動実行されることはありません。
+`context build` コマンドを使うと、Excel の描画画像とセル・図形の文字・位置情報から、シート全体の意味を理解し、代理ノートに説明を追記できます。
+解析に使用した画像は、`img` フォルダに保存され、シートの説明文とともに画像リンクとして追加されます。
+`context build` コマンドは、通常の `pull` から自動実行されることはありません。
 
 > [!IMPORTANT]
-> `context build` は選択シートの画像・文字・位置情報を、ログイン済みの Codex サービスへ送信します。
-> 送信できる内容か確認してから実行してください。利用枠や料金はアカウント・契約によって異なり、この CLI は金額を見積もりません。
+> `context build` は選択シートの画像・文字・位置情報を、GenAI Bridge で選択した接続先へ送信します。
+> 送信できる内容か確認してから実行してください。利用枠や料金は接続先・契約によって異なります。
 
 ### 準備と実行
 
-Windows、デスクトップ版 Microsoft Excel、インストール・ログイン済みの Codex CLI、画像入力に対応するモデルが必要です。
-同梱設定のモデルは `gpt-5.6-sol`、推論量は `medium` です。
-実際に利用できるモデルを設定し、画像化用の追加依存を含めてインストールします。
+Windows、デスクトップ版 Microsoft Excel、画像入力に対応する生成AIの接続先・モデルが必要です。
+[tkn_genai_bridge](https://github.com/tuckn/tkn_genai_bridge) 0.8.0 の画像対応リビジョンを依存関係として固定しています。
+Bridge が対応する画像入力の接続先は Codex、Ollama、Azure OpenAI です。その他のプロファイルは画像化前に停止します。
+既定の `codex-default` は、ログイン済みの Codex CLI を利用します。モデル・推論量・タイムアウトは共有プロファイルから読み込みます。
+GenAI Bridge の組み込み既定ではモデル・推論量は未指定、タイムアウトは300秒です。必要に応じて共有設定を変更してください。
+CLI は[通常のインストール](#インストールする)で準備できます。シート画像の生成にはデスクトップ版 Microsoft Excel が必要です。
 
-```shell
-cd "C:\path\to\tkn_excel_catalog_pipeline"
-uv tool install ".[context]" --reinstall
-tkn-excel-catalog context --help
+接続先は `~/.tkn/genai_bridge/config.yaml` に設定します。
+共有設定の作成方法は [GenAI Bridge のセットアップ](https://github.com/tuckn/tkn_genai_bridge#セットアップ) を参照してください。
+このアプリ側ではプロファイル名と必要な上書きだけを指定します。
+
+```yaml
+context:
+  bridge_profile: codex-default
+  overrides:
+    timeout_seconds: 600
 ```
+
+`context.overrides` は共有プロファイルより優先します。接続先・認証は共有設定で管理し、アプリ固有の上書きだけを記載してください。
+通常の同期、`context sheets`、`context import` では共有プロファイルを解決せず、AIを呼び出しません。
 
 事前に `pull` で代理ノートを作成してください。
 以下の `example.xlsx` と `Solutions` は、対象ブックの相対パスと実際のシート名に置き換えます。
@@ -605,7 +618,7 @@ tkn-excel-catalog context sheets --source personal-excel --workbook "example.xls
 tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx" --sheet "Solutions" --dry-run
 ```
 
-保存済みブック、シート選択、既存ノート、再利用・手動編集の保護条件を確認します。
+保存済みブック、シート選択、既存ノート、再利用・手動編集の保護条件を確認します。生成対象では共有プロファイルと画像対応の接続先も検証し、結果の `bridgePlan` に解決した生成条件を含めます。
 ファイルの保存、Excel の起動、画像化、認証、AI 呼び出しは行いません。
 画像数とトークン数は、この段階では確定できません。
 
@@ -617,7 +630,7 @@ tkn-excel-catalog context build --source personal-excel --workbook "example.xlsx
 
 `--sheet` は完全一致の名前で繰り返し指定できます。
 `--all-sheets` は表示中の全シートを選び、非表示シートは名前を明示した場合だけ対象になります。
-未対応のシート種別は AI を呼ぶ前に拒否します。
+未対応のシート種別が含まれる場合は、AI を呼ぶ前に拒否します。
 相対ブックパスは選択 source の入力ルート基準です。絶対パスでも、その範囲内で `include` / `ignore` の条件を満たす必要があります。
 全シートを事前検証した後に順番に処理し、最初の失敗で停止します。先に成功したシートは残ります。
 
@@ -636,7 +649,7 @@ sequenceDiagram
     participant Book as 保存済みブック
     participant Output as 代理ノート・画像・記録
     participant Excel as Excel の別インスタンス
-    participant AI as Codex CLI・サービス
+    participant AI as GenAI Bridge・選択した接続先
 
     App->>Book: 保存済みの内容を取得
     App->>App: 全選択シートを事前検証
@@ -700,7 +713,7 @@ Markdown 内のリンクは相対パスです。移動時はノートと `img` �
 識別子でブック・シート間の衝突を防ぎ、古い画像は自動削除しません。
 PDF とブックのコピーは一時ファイル、PNG と抽出根拠の JSON は保存対象です。
 
-シート内容、関連する内部データ、設定、生成指示の版が同じで、画像と生成本文が保持されていれば、前回の結果を再利用します。
+シート内容、関連する内部データ、描画設定、GenAI Bridge が解決した生成条件・バージョン、出力スキーマ、生成指示の版が同じで、画像と生成本文が保持されていれば、前回の結果を再利用します。共有プロファイルでモデルを変更した場合も再生成の対象です。
 この場合、Excel の起動も AI 呼び出しもなく、トークン消費は 0 です。
 共有書式の変更は複数シートの再生成につながる場合があります。無関係なセル文字列の変更は通常影響しません。
 
@@ -719,35 +732,36 @@ AI 呼び出しは自動再試行しません。失敗・タイムアウト・�
 
 呼び出しごとの入力・出力・キャッシュ入力・推論トークンと所要時間を表示し、結果 JSON にその実行の合計を含めます。
 キャッシュ入力は入力の内数、推論トークンは出力の内数なので重複加算しません。
-`turn.completed` の使用量だけを合計し、累積イベントは加算しません。
+トークン集計はGenAI Bridgeに委ねます。Codexでは完了ターンの使用量を扱い、累積イベントを重複加算しません。
 不明・中断時は `unknown` / `null` とし、判明した部分的な使用量は記録します。
-使用量の記録には生成指示の本文、生成本文、認証情報を保存しません。
+使用量の記録にはGenAI Bridgeの実行記録、画像ハッシュ、共有プロファイル名、生成条件のハッシュも含めます。生成指示の本文、生成本文、画像本体、認証情報は保存しません。失敗してもGenAI Bridgeから返った使用量と既知の小計を保持します。参考単価が共有設定にある場合は、GenAI Bridgeが計算した参考額も実行記録に残ります。画像化前のdry-runではトークン数・金額を見積もりません。
 
 設定ファイルのトップレベル `context` で生成条件を変更します。省略時は以下の値です。
 
-| キー（`context.` 以下） | 既定値 | 意味・単位 |
-| --- | --- | --- |
-| `executable` | `codex` | 呼び出す Codex CLI |
-| `model` | `gpt-5.6-sol` | 画像入力に対応するモデル |
-| `reasoning_effort` | `medium` | `low` / `medium` / `high` / `xhigh` |
-| `language` | `Japanese` | 生成文の言語 |
-| `timeout_seconds` | `600` | AI 呼び出しのタイムアウト秒数 |
-| `max_images` | `24` | 1 シートの全体図を含む画像数の上限。最大 `100` |
-| `tile_width_points` / `tile_height_points` | `1200` / `800` | 詳細画像の幅・高さ。Excel のポイント単位 |
-| `overlap_points` | `80` | 隣接画像の重なり。幅・高さの小さい方の半分未満 |
-| `image_dpi` | `150` | 画像の解像度。`72`～`300` dpi |
-| `max_cells` / `max_objects` | 各 `10000` | 1 シートの抽出対象セル・オブジェクト数の上限 |
-| `max_input_chars` | `200000` | シートの抽出根拠・送信内容の文字数上限 |
-| `max_workbook_mb` | `100` | 入力ブックのサイズ上限。1 単位は 1024 × 1024 バイト |
+| キー（`context.` 以下）                      | 既定値             | 意味・単位                                           |
+| ---------------------------------------------- | ------------------ | ---------------------------------------------------- |
+| `bridge_profile`                             | `codex-default`  | GenAI Bridge共有設定のプロファイル名                 |
+| `overrides`                                  | `{}`             | 共有プロファイルに重ねるアプリ固有の設定             |
+| `language`                                   | `Japanese`       | 生成文の言語                                         |
+| `max_images`                                 | `24`             | 1 シートの全体図を含む画像数の上限。最大`100`      |
+| `tile_width_points` / `tile_height_points` | `1200` / `800` | 詳細画像の幅・高さ。Excel のポイント単位             |
+| `overlap_points`                             | `80`             | 隣接画像の重なり。幅・高さの小さい方の半分未満       |
+| `image_dpi`                                  | `150`            | 画像の解像度。`72`～`300` dpi                    |
+| `max_cells` / `max_objects`                | 各`10000`        | 1 シートの抽出対象セル・オブジェクト数の上限         |
+| `max_input_chars`                            | `200000`         | シートの抽出根拠・送信内容の文字数上限               |
+| `max_workbook_mb`                            | `100`            | 入力ブックのサイズ上限。1 単位は 1024 × 1024 バイト |
 
-数値項目は正の整数です。
+描画・抽出の数値項目は正の整数です。`overrides` 内はGenAI Bridgeの設定仕様に従います。
+旧形式の `context.executable` / `model` / `reasoning_effort` / `timeout_seconds` は、明示された値だけを読み込み時に `overrides` へ変換します。
+`executable` は `overrides.cli.executable` に対応します。同じ設定層に旧項目と対応する `overrides` を重ねて書くとエラーになります。
+利用者の設定ファイルは自動変更しません。旧項目を省略していた場合は、従来の固定モデル・推論量・600秒ではなく共有プロファイルの設定を使います。
 上限を超えた場合は内容を切り捨てずエラーにします。対象と必要量を確認してから設定を変更してください。
 条件の変更により、前回の生成結果を再利用できなくなる場合があります。
 
 ## 確認済みの Markdown を取り込む
 
 `context import` は、作成・確認済みのシート説明を、見出しと画像リンクの調整だけで代理ノートへ取り込みます。
-Excel の起動、画像化、AI 呼び出し、`[context]` の追加依存は不要です。
+このコマンドは Excel の起動、画像化、AI 呼び出しを行いません。
 事前に `pull` で代理ノートを作成してください。
 
 以下のブック・シート名と Markdown パスを実際の値に置き換え、まず検証します。
@@ -826,14 +840,11 @@ AI で作り直す場合の `--force` の影響は、[保存先と手動編集�
 ```shell
 cd "C:\path\to\tkn_excel_catalog_pipeline"
 uv tool install . --reinstall
-tkn-excel-catalog --help
 tkn-excel-catalog --version
 ```
 
-AI によるシート説明を使う場合は、インストール対象を `".[context]"` にします。
 `--reinstall` でコード・同梱ファイル・依存を反映します。
 `--force` はツールのインストール自体を強制する指定で、同じ版の再構築を目的とした代替にはしません。
-旧実行名 `excel-catalog` を使っている場合も再インストールし、呼び出し名を `tkn-excel-catalog` へ変更します。
 
 ### 古い実行手順を見直す
 
@@ -908,15 +919,15 @@ uv tool install -e . --reinstall
 
 仕様を調べたり変更したりする場合は、次のファイルを入口にしてください。
 
-| 対象 | 確認先 |
-| --- | --- |
-| コマンドと画面出力 | [cli.py](src/excel_catalog_pipeline/cli.py) |
-| 設定の検証と既定値 | [config.py](src/excel_catalog_pipeline/config.py)、[models.py](src/excel_catalog_pipeline/models.py)、[同梱設定](src/excel_catalog_pipeline/resources/config.example.yaml) |
-| 同期と競合判定 | [pipeline.py](src/excel_catalog_pipeline/pipeline.py) |
-| ノートの Frontmatter・見出し・節の順序 | [同梱テンプレート](src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md) |
-| シート説明の生成・取り込み | [context.py](src/excel_catalog_pipeline/context.py)、[context_import.py](src/excel_catalog_pipeline/context_import.py) |
-| 検証例 | [tests](tests/) |
-| 利用許諾 | [LICENSE](LICENSE) |
+| 対象                                   | 確認先                                                                                                                                                                  |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| コマンドと画面出力                     | [cli.py](src/excel_catalog_pipeline/cli.py)                                                                                                                              |
+| 設定の検証と既定値                     | [config.py](src/excel_catalog_pipeline/config.py)、[models.py](src/excel_catalog_pipeline/models.py)、[同梱設定](src/excel_catalog_pipeline/resources/config.example.yaml) |
+| 同期と競合判定                         | [pipeline.py](src/excel_catalog_pipeline/pipeline.py)                                                                                                                    |
+| ノートの Frontmatter・見出し・節の順序 | [同梱テンプレート](src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md)                                                                                 |
+| シート説明の生成・取り込み             | [context.py](src/excel_catalog_pipeline/context.py)、[context_import.py](src/excel_catalog_pipeline/context_import.py)                                                    |
+| 検証例                                 | [tests](tests/)                                                                                                                                                          |
+| 利用許諾                               | [LICENSE](LICENSE)                                                                                                                                                       |
 
 ノートのテンプレートはパッケージに含める管理用ファイルです。ユーザー設定としては編集しません。
 Python 側が動的なブック内容の生成、形式の検証、管理マーカーの置き換えを担当します。

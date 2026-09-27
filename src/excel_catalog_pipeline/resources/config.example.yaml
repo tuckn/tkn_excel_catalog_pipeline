@@ -21,14 +21,16 @@ sync:
   allow_source_rename: false
   max_extracted_text_chars: 12000
 
-# Only the explicit `context build` command uses Codex. Normal pull remains local.
+# Only explicit `context build` uses GenAI Bridge. Normal pull remains local.
+# Connections/models/authentication: ~/.tkn/genai_bridge/config.yaml.
 # Images always live in each proxy note's sibling img/ directory, with relative links.
 context:
-  executable: codex
-  model: gpt-5.6-sol
-  reasoning_effort: medium
+  bridge_profile: codex-default
+  overrides: {}
+  # Example per-application override:
+  # overrides:
+  #   timeout_seconds: 600
   language: Japanese
-  timeout_seconds: 600
   max_images: 24
   tile_width_points: 1200
   tile_height_points: 800

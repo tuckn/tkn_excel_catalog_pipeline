@@ -4,16 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tkn-excel-catalog-pipeline"
-version = "0.5.0"
+version = "0.6.0"
 description = "Synchronize Excel workbook metadata with Markdown catalog notes."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Tuckn" }]
-dependencies = ["PyYAML>=6.0.2"]
-
-[project.optional-dependencies]
-context = ["pywin32>=308; sys_platform == 'win32'", "pypdfium2>=4.30", "Pillow>=11.0"]
+dependencies = [
+  "PyYAML>=6.0.2",
+  "pydantic>=2.10,<3",
+  "tkn-genai-bridge @ https://github.com/tuckn/tkn_genai_bridge/archive/335d7fb275095c07d5bc37282d499de462316ff1.zip",
+  "pywin32>=308; sys_platform == 'win32'",
+  "pypdfium2>=4.30; sys_platform == 'win32'",
+  "Pillow>=11.0; sys_platform == 'win32'",
+]
 
 [project.scripts]
 tkn-excel-catalog = "excel_catalog_pipeline.cli:main"
@@ -28,6 +32,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/excel_catalog_pipeline"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 addopts = "-ra"

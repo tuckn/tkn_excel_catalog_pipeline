@@ -4,14 +4,13 @@ import io
 import json
 import logging
 import os
-import subprocess
 import zipfile
 from pathlib import Path
 
 import pytest
+from tkn_genai_bridge import Profile
 
 import excel_catalog_pipeline.context as context
-import excel_catalog_pipeline.context_provider as provider
 from excel_catalog_pipeline.adapters.markdown import note_path, render_note
 from excel_catalog_pipeline.adapters.ooxml import inspect_workbook
 from excel_catalog_pipeline.config import DEFAULT_CONFIG, ConfigError, validate_config
@@ -37,62 +36,6 @@ def rewrite_package(data: bytes, changes: dict[str, bytes]) -> bytes:
         for name, content in changes.items():
             target.writestr(name, content)
     return output.getvalue()
-
-
-def test_usage_sums_completed_turns_not_cumulative_events() -> None:
-    events = [
-        {"type": "turn.started"},
-        {
-            "type": "turn.completed",
-            "usage": {
-                "input_tokens": 100,
-                "output_tokens": 20,
-                "cached_input_tokens": 80,
-                "reasoning_output_tokens": 5,
-            },
-        },
-        {"type": "token_count", "usage": {"input_tokens": 9999}},
-        {"type": "turn.started"},
-        {
-            "type": "turn.completed",
-            "usage": {
-                "input_tokens": 50,
-                "output_tokens": 10,
-                "cached_input_tokens": 40,
-                "reasoning_output_tokens": 2,
-            },
-        },
-    ]
-    usage = provider.parse_usage("\n".join(json.dumps(e) for e in events))
-    assert usage["inputTokens"] == 150
-    assert usage["outputTokens"] == 30
-    assert usage["cachedInputTokens"] == 120
-    assert usage["reasoningTokens"] == 7
-    assert usage["cacheWriteTokens"] is None
-    assert usage["usageComplete"] is True
-
-
-@pytest.mark.parametrize("tail", [{"type": "turn.started"}, {"type": "turn.failed"}])
-def test_partial_usage_is_unknown_with_known_partial_counts(tail: dict) -> None:
-    events = [
-        {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
-        {"type": "turn.started"},
-        tail,
-    ]
-    usage = provider.parse_usage("\n".join(json.dumps(e) for e in events))
-    assert usage["usageComplete"] is False
-    assert usage["inputTokens"] is None
-    assert usage["knownInputTokens"] == 10
-
-
-def test_invalid_usage_numbers_are_not_silently_zero() -> None:
-    result = provider.parse_usage(
-        '{"type":"turn.completed","usage":{"input_tokens":true,"output_tokens":-3}}'
-    )
-    assert result["inputTokens"] is None
-    assert result["outputTokens"] is None
-    assert result["usageComplete"] is False
-    assert provider.parse_usage("not json")["inputTokens"] is None
 
 
 def test_extraction_ignores_phonetics_and_includes_drawing_text(tmp_path: Path) -> None:
@@ -182,7 +125,7 @@ def build_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         (output / "001.png").write_bytes(b"fixture image")
         return [{"image": "001.png", "range": "$A$1:$C$9", "overview": False}]
 
-    def generate(config, evidence, images, working, usage_path, logger, *, on_usage):
+    def generate(config, evidence, images, usage_path, logger, *, profile, on_usage):
         calls.append(evidence["sheet"])
         on_usage(
             {
@@ -201,7 +144,9 @@ def build_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(context, "render_sheet", render)
     monkeypatch.setattr(context, "generate_markdown", generate)
-    monkeypatch.setattr(context, "resolve_executable", lambda config: "codex")
+    monkeypatch.setattr(context, "resolve_profile", lambda config: Profile())
+    real_plan = context.generation_plan
+    monkeypatch.setattr(context, "generation_plan", lambda profile, **kwargs: real_plan(profile))
 
     def run(**kwargs):
         return context.run_context(
@@ -329,54 +274,6 @@ def test_duplicate_markers_are_never_replaced() -> None:
     block = "<!-- excel-catalog:begin context-1 -->\nbody\n<!-- excel-catalog:end context-1 -->"
     with pytest.raises(ContextError, match="duplicate"):
         context.update_text(block + block, "1", block)
-
-
-def test_provider_timeout_records_unknown_not_zero(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(provider, "resolve_executable", lambda config: "codex")
-
-    def timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired("codex", 1, output=b'{"type":"turn.started"}\n')
-
-    monkeypatch.setattr(provider.subprocess, "run", timeout)
-    usage = tmp_path / "usage.json"
-    with pytest.raises(ContextError, match="exceeded"):
-        provider.generate_markdown(
-            ContextConfig(timeout_seconds=1), {"sheet": "Data"}, [], tmp_path, usage, LOGGER
-        )
-    record = json.loads(usage.read_text(encoding="utf-8"))
-    assert record["status"] == "timeout"
-    assert record["inputTokens"] is None
-    assert record["usageComplete"] is False
-    assert "prompt" not in record
-
-
-def test_provider_parses_success_and_passes_readonly_image_options(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setattr(provider, "resolve_executable", lambda config: "codex")
-    image = tmp_path / "001.png"
-    image.write_bytes(b"image")
-
-    def respond(command, **kwargs):
-        assert "--ignore-user-config" in command
-        assert command[command.index("--sandbox") + 1] == "read-only"
-        assert command[command.index("--image") + 1] == str(image)
-        assert "SOURCE CONTENT" in kwargs["input"]
-        (tmp_path / "response.json").write_text(
-            '{"markdown":"### Test\\n\\nGood."}', encoding="utf-8"
-        )
-        output = '{"type":"turn.completed","usage":{"input_tokens":200,"output_tokens":30,"cached_input_tokens":150}}\n'
-        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
-
-    monkeypatch.setattr(provider.subprocess, "run", respond)
-    usage = tmp_path / "usage.json"
-    result = provider.generate_markdown(
-        ContextConfig(), {"sheet": "Data"}, [image], tmp_path, usage, LOGGER
-    )
-    assert result.startswith("### Test")
-    record = json.loads(usage.read_text(encoding="utf-8"))
-    assert record["inputTokens"] == 200 and record["cachedInputTokens"] == 150
-    assert record["usageComplete"] is True
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows sharing semantics")
@@ -533,3 +430,99 @@ def test_context_cli_requires_explicit_sheet_selection() -> None:
             ["context", "build", "--source", "example", "--workbook", "book.xlsx"]
         )
     assert failure.value.code == 2
+
+
+def test_shared_model_change_invalidates_context_cache(build_setup, monkeypatch):
+    _, _, _, _, calls, run = build_setup
+    assert run()["results"][0]["status"] == "written"
+    assert run()["results"][0]["status"] == "cached"
+    monkeypatch.setattr(context, "resolve_profile", lambda config: Profile(model="changed-model"))
+    assert run()["results"][0]["status"] == "written"
+    assert len(calls) == 2
+
+
+def test_dry_run_validates_bridge_without_executable_or_generation(build_setup, monkeypatch):
+    _, _, _, state, calls, run = build_setup
+    from tkn_genai_bridge import CliSettings, Runtime
+
+    import excel_catalog_pipeline.context_provider as provider
+
+    monkeypatch.setattr(context, "generation_plan", provider.generation_plan)
+    monkeypatch.setattr(
+        context,
+        "resolve_profile",
+        lambda config: Profile(cli=CliSettings(executable="missing-fixture.exe")),
+    )
+    monkeypatch.setattr(Runtime, "generate", lambda *a, **k: pytest.fail("AI must not run"))
+    result = run(dry_run=True)
+    assert result["status"] == "success"
+    assert result["results"][0]["bridgePlan"]["will_call_provider"] is False
+    assert not calls and not state.exists()
+
+
+def test_bridge_profile_failure_prevents_rendering(build_setup, monkeypatch):
+    _, _, note, _, calls, run = build_setup
+    before = note.read_bytes()
+
+    def invalid(config):
+        raise ContextError("fixture profile missing")
+
+    monkeypatch.setattr(context, "resolve_profile", invalid)
+    monkeypatch.setattr(context, "render_sheet", lambda *a: pytest.fail("must not render"))
+    result = run(dry_run=True)
+    assert result["status"] == "error"
+    assert note.read_bytes() == before and not calls
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_build_through_real_bridge_preserves_workbook_and_failure_note(
+    build_setup, monkeypatch, failed
+):
+    import sys
+
+    from tkn_genai_bridge import CliSettings, ProviderError
+    from tkn_genai_bridge.providers import cli
+
+    import excel_catalog_pipeline.context_provider as provider
+
+    _, workbook, note, _, _, run = build_setup
+    original_workbook = workbook.read_bytes()
+    original_note = note.read_bytes()
+    monkeypatch.setattr(
+        context,
+        "resolve_profile",
+        lambda config: Profile(cli=CliSettings(executable=sys.executable)),
+    )
+    monkeypatch.setattr(context, "generation_plan", provider.generation_plan)
+    monkeypatch.setattr(context, "generate_markdown", provider.generate_markdown)
+
+    def render(snapshot, evidence, output, config):
+        output.mkdir()
+        (output / "001.png").write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+        return [{"image": "001.png", "range": "$A$1:$C$9", "overview": False}]
+
+    def process(command, prompt, cwd, timeout, **kwargs):
+        if failed:
+            raise ProviderError("fixture failure", code="process_exit")
+        Path(command[command.index("--output-last-message") + 1]).write_text(
+            '{"markdown":"### Generated through Bridge"}'
+        )
+        return '{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":4}}'
+
+    monkeypatch.setattr(context, "render_sheet", render)
+    monkeypatch.setattr(cli, "run_process", process)
+    result = run()
+    assert workbook.read_bytes() == original_workbook
+    assert result["usage"]["calls"] == 1
+    if failed:
+        assert result["status"] == "error"
+        assert note.read_bytes() == original_note
+        assert result["usage"]["inputTokens"] is None
+    else:
+        assert result["status"] == "success"
+        assert b"Generated through Bridge" in note.read_bytes()
+        assert b"Keep this." in note.read_bytes()
+        assert result["usage"]["inputTokens"] == 12
+        journal = Path(result["results"][0]["usagePath"])
+        assert json.loads(journal.read_text())["generationRecord"]["images"]
+        assert run()["results"][0]["status"] == "cached"
