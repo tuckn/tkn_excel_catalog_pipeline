@@ -7,9 +7,13 @@ from pathlib import Path
 
 import pytest
 from tkn_genai_bridge import (
+    AzureSettings,
     CliSettings,
+    GenerationRequest,
+    ImageInput,
     Profile,
     ProviderError,
+    Runtime,
     TokenCounts,
     Usage,
 )
@@ -71,7 +75,7 @@ def test_real_bridge_receives_ordered_images_schema_and_journals_usage(setup_pro
     record = json.loads(journal.read_text())
     assert record["inputTokens"] == 200 and record["cachedInputTokens"] == 150
     assert record["usageComplete"] is True
-    assert record["generationRecord"]["bridge_version"] == "0.8.0"
+    assert record["generationRecord"]["bridge_version"] == "0.10.0"
     assert len(record["generationRecord"]["images"]) == 2
     assert "### Good" not in journal.read_text()
     assert "SOURCE CONTENT" not in journal.read_text()
@@ -163,10 +167,30 @@ def test_image_count_is_bounded_before_reading(tmp_path, images):
     assert not list(tmp_path.iterdir())
 
 
-def test_unsupported_image_profile_stops_before_execution(monkeypatch):
-    monkeypatch.setattr(provider, "load_profile", lambda *a, **k: Profile(provider="claude-code"))
-    with pytest.raises(ContextError, match="Sheet images require"):
-        provider.resolve_profile(ContextConfig())
+@pytest.mark.parametrize(
+    "name", ["codex", "claude-code", "github-copilot", "antigravity", "ollama", "azure-openai"]
+)
+def test_all_bridge_image_providers_resolve_and_plan_without_generation(monkeypatch, name):
+    settings = {"provider": name, "model": "fixture-vision"}
+    if name == "azure-openai":
+        settings["azure"] = AzureSettings(endpoint="https://example.openai.azure.com/openai/v1")
+    profile = Profile(**settings)
+    monkeypatch.setattr(provider, "load_profile", lambda *a, **k: profile)
+    monkeypatch.setattr(Runtime, "generate", lambda *a, **k: pytest.fail("AI must not run"))
+    resolved = provider.resolve_profile(ContextConfig())
+    assert provider.generation_plan(resolved)["will_call_provider"] is False
+    with Runtime(resolved) as runtime:
+        plan = runtime.plan(
+            GenerationRequest(
+                prompt="Describe sheet",
+                output_schema=provider.SCHEMA,
+                images=[ImageInput(data=PNG, media_type="image/png")],
+            ),
+            check_executable=False,
+        )
+    assert plan.provider == name
+    assert len(plan.images) == 1
+    assert plan.will_call_provider is False
 
 
 def test_shared_profile_and_overrides_are_passed_to_bridge(monkeypatch):

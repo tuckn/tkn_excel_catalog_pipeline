@@ -25,6 +25,8 @@ sync:
 # Connections/models/authentication: ~/.tkn/genai_bridge/config.yaml.
 # Images always live in each proxy note's sibling img/ directory, with relative links.
 generation:
+  # Select an image-capable model in the shared profile.
+  # Examples: claude-default, copilot-default, antigravity-default, local-vision, azure-quality.
   bridge_profile: codex-default
   overrides: {}
   # Example per-application override:

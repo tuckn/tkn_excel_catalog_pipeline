@@ -441,7 +441,8 @@ def test_shared_model_change_invalidates_context_cache(build_setup, monkeypatch)
     assert len(calls) == 2
 
 
-def test_dry_run_validates_bridge_without_executable_or_generation(build_setup, monkeypatch):
+@pytest.mark.parametrize("name", ["codex", "claude-code", "github-copilot", "antigravity"])
+def test_dry_run_validates_bridge_without_executable_or_generation(build_setup, monkeypatch, name):
     _, _, _, state, calls, run = build_setup
     from tkn_genai_bridge import CliSettings, Runtime
 
@@ -451,7 +452,7 @@ def test_dry_run_validates_bridge_without_executable_or_generation(build_setup, 
     monkeypatch.setattr(
         context,
         "resolve_profile",
-        lambda config: Profile(cli=CliSettings(executable="missing-fixture.exe")),
+        lambda config: Profile(provider=name, cli=CliSettings(executable="missing-fixture.exe")),
     )
     monkeypatch.setattr(Runtime, "generate", lambda *a, **k: pytest.fail("AI must not run"))
     result = run(dry_run=True)

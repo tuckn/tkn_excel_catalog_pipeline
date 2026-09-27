@@ -61,9 +61,8 @@ def resolve_profile(config: ContextConfig) -> Profile:
         profile = load_profile(config.bridge_profile, overrides=config.overrides)
     except GenAIError as exc:
         raise ContextError(f"Bridge configuration failed ({exc.code}): {exc}") from exc
-    # context build always needs images, including before Excel has rendered them.
-    if profile.provider not in {"codex", "ollama", "azure-openai"}:
-        raise ContextError("Sheet images require a codex, ollama or azure-openai Bridge profile")
+    # All providers in the pinned Bridge version support image input.
+    # Runtime.plan validates the actual images before generation.
     return profile
 
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tkn-excel-catalog-pipeline"
-version = "0.8.0"
+version = "0.8.1"
 description = "Synchronize Excel workbook metadata with Markdown catalog notes."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ authors = [{ name = "Tuckn" }]
 dependencies = [
   "PyYAML>=6.0.2",
   "pydantic>=2.10,<3",
-  "tkn-genai-bridge @ https://github.com/tuckn/tkn_genai_bridge/archive/335d7fb275095c07d5bc37282d499de462316ff1.zip",
+  "tkn-genai-bridge @ https://github.com/tuckn/tkn_genai_bridge/archive/9cf534e47159901c3bb05bb802695fad746cc338.zip",
   "pywin32>=308; sys_platform == 'win32'",
   "pypdfium2>=4.30; sys_platform == 'win32'",
   "Pillow>=11.0; sys_platform == 'win32'",

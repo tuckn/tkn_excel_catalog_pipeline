@@ -690,8 +690,10 @@ tkn-excel-catalog adopt --source personal-excel
 ### 準備と実行
 
 Windows、デスクトップ版 Microsoft Excel、画像入力に対応する生成AIの接続先・モデルが必要です。
-[tkn_genai_bridge](https://github.com/tuckn/tkn_genai_bridge) 0.8.0 の画像対応リビジョンを依存関係として固定しています。
-Bridge が対応する画像入力の接続先は Codex、Ollama、Azure OpenAI です。その他のプロファイルは画像化前に停止します。
+[tkn_genai_bridge](https://github.com/tuckn/tkn_genai_bridge) 0.10.0 の画像対応リビジョンを依存関係として固定しています。
+画像入力の接続先は Codex、Claude Code、GitHub Copilot、Antigravity、Ollama、Azure OpenAI に対応しています。
+各接続先で画像対応モデルを選択してください。GitHub Copilot は `--attachment` 対応の CLI が必要です。
+既存環境は、このリポジトリで `uv tool install . --reinstall` を実行して依存関係も更新してください。
 既定の `codex-default` は、ログイン済みの Codex CLI を利用します。モデル・推論量・タイムアウトは共有プロファイルから読み込みます。
 GenAI Bridge の組み込み既定ではモデル・推論量は未指定、タイムアウトは300秒です。必要に応じて共有設定を変更してください。
 CLI は[通常のインストール](#インストールする)で準備できます。シート画像の生成にはデスクトップ版 Microsoft Excel が必要です。
@@ -706,6 +708,10 @@ generation:
   overrides:
     timeout_seconds: 600
 ```
+
+`generation.bridge_profile` を共有設定のプロファイル名へ変更すると接続先を切り替えられます。
+Bridge の設定例には `claude-default`、`copilot-default`、`antigravity-default`、`azure-quality` があります。
+ローカルの画像処理には組み込みの `local-vision`（Ollama / `qwen3.5:9b`）も選べます。Ollama とモデルは別途準備してください。
 
 `generation.overrides` は共有プロファイルより優先します。接続先・認証は共有設定で管理し、アプリ固有の上書きだけを記載してください。
 通常の同期、`context sheets`、`context import` では共有プロファイルを解決せず、AIを呼び出しません。
