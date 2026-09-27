@@ -307,6 +307,7 @@ def render_note(
     existing: ProxyNote | None = None,
     touch_updated: bool = True,
     refresh_source_properties: bool = True,
+    cover: Any = None,
 ) -> str:
     timestamp = now_iso()
     values = metadata or workbook.metadata()
@@ -339,6 +340,7 @@ def render_note(
             {
                 "title": title,
                 "description": description,
+                "cover": existing_frontmatter.get("cover", "") if cover is None else cover,
                 "subject": values["subject"],
                 "author": values["author"],
                 "keywords": metadata_to_frontmatter_terms(

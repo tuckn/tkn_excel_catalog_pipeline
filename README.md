@@ -62,6 +62,52 @@ sourceFileName: example.xlsx
 ノートを Obsidian やテキスト検索で探し、`sourceFullPath` から元の Excel ファイルを確認できます。
 ノート先頭の YAML 領域（Frontmatter）で `subject` や `keywords` を編集し、`push` で Excel のプロパティへ反映できます。
 
+## Obsidian Bases のカードにサムネイルを表示する
+
+`pull` は Excel に保存されたブックのサムネイルをローカルで PNG に変換し、
+`notes.root/img/excel-cover-<画像ハッシュ>.png` として保存します。
+Frontmatter の `cover` には Vault 内の画像へのリンクを設定します。
+`.xlsx` / `.xlsm` のパッケージサムネイルが対象で、シート上の挿入画像は選びません。
+Windows では EMF / WMF（Excel の標準 WMF を含む）と PNG / JPEG に対応します。
+Excel の起動、AI 呼び出し、外部サービスへの画像送信は不要です。
+
+```yaml
+cover: "[[reference/entities/files/Excel/img/excel-cover-<画像ハッシュ>.png]]"
+```
+
+既存 Base の `views` に次のビューを追加するか、Obsidian でカードビューを作成し、
+画像プロパティを `cover` に指定してください。既存のフィルターはそのまま使えます。
+
+```yaml
+  - type: cards
+    name: Cards View
+    order:
+      - file.name
+      - title
+      - description
+    image: note.cover
+    imageFit: contain
+    cardSize: 200
+```
+
+更新版をインストールした後、まず変更予定を確認してから反映できます。
+
+```shell
+uv tool install . --reinstall
+tkn-excel-catalog pull --dry-run
+tkn-excel-catalog pull
+```
+
+- `--dry-run` は画像変換まで検証しますが、画像・ノート・同期状態を保存しません。
+- サムネイルがないブックは `cover` が空になります。画像のないカードも表示されます。
+- 手動で設定した `cover` は保持します。自動抽出へ戻す場合は `cover` を空にしてください。
+- 自動設定した画像は次回の `pull` で更新し、欠損・破損した出力画像も再生成します。
+- 変換できないサムネイルは警告を出し、既存の `cover` と通常のメタデータ同期を保持します。
+- 同期状態の `managedCover` で自動設定したリンクを識別します。状態を失った場合、既存の非空の `cover` は手動指定として保持します。
+- 元の Excel と過去に出力した画像は削除しません。画像は最大辺 1200 px の PNG です。
+
+カードの画像プロパティはローカル添付へのリンクを受け付けます（[Obsidian 公式ヘルプ](https://help.obsidian.md/bases/views/cards)）。
+
 ## 対象範囲
 
 | 目的                                      | 操作                     | 得られるもの・変更対象                                 |
@@ -137,7 +183,7 @@ notepad "$HOME\.tkn\excel_catalog_pipeline\config.yaml"
 同梱テンプレートをそのまま使う場合も、`sources` 内の該当項目を編集すれば始められます。
 
 ```yaml
-schema_version: 1
+schema_version: "1.0.0"
 sources:
   personal-excel:
     path: 'C:\path\to\excel-workbooks'
@@ -286,13 +332,15 @@ tkn-excel-catalog status --source personal-excel
 辞書は項目ごとに統合します。ただし `sources` は、後のファイルに指定があれば全体を置き換えます（空の `{}` で全 source を解除）。同じIDの項目も部分統合しません。`include` などのリストも全体を置き換えます。
 相対パスは設定ファイルの場所ではなく、現在の作業フォルダを基準に解決します。
 個別の CLI オプションによる指定は、その対象となる動作で優先されます。
+設定の版はアプリの版とは独立しています。破壊的変更は Major、互換性のある追加は Minor、構造を変えない修正は Patch を更新します。通常版の `MAJOR.MINOR.PATCH` を使用し、プレリリース・ビルド接尾辞には対応しません。同じ Major の現行版以下と旧整数 `1` を受け入れ、新しい版・異なる Major・不正な型は設定層ごとに拒否します。版を省略した部分設定も引き続き読み込めます。`config show` は現行版と `generation` を出力します。
+
 `config show` はファイルを作成せず、読み込んだファイルがない場合は組み込み値を使っていることを表示します。
 
 ### 探索範囲の設定
 
 | 設定                                           | 意味・省略時の動作                                                                                                           |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`                             | 設定形式の版。`1` を指定します。                                                                                           |
+| `schema_version`                             | 設定形式の版。`"1.0.0"`（MAJOR.MINOR.PATCH）を指定します。                                                                                           |
 | `sources.<id>`                               | キーが source の一意なIDです。継続利用中は安定した名前を使います。                                                           |
 | `sources.<id>.id`                            | 省略または`null` を推奨。指定する場合はキーと同じ文字列にします。                                                          |
 | `sources.<id>.path`                          | 必須。入力ブックのルートフォルダです。                                                                                       |
@@ -310,7 +358,7 @@ tkn-excel-catalog status --source personal-excel
 新形式では内側の `id` は不要です。YAML 内の重複キーや、キーと異なる `id` はエラーになります。
 
 0.5.0 から設定例と `config show` の `sources` はオブジェクト形式です。
-`schema_version: 1` と旧配列形式の読み込みは引き続き対応します。
+旧整数版 `schema_version: 1` と旧配列形式の読み込みは引き続き対応します。
 既存設定は `- id: personal-excel` を `personal-excel:` に置き換えるだけで移行できます。
 `config show` の出力を利用するプログラムは、配列の添字から source ID のキー参照に変更してください。
 未知の設定キーや、不正な型・値はエラーになります。
@@ -595,13 +643,13 @@ CLI は[通常のインストール](#インストールする)で準備でき�
 このアプリ側ではプロファイル名と必要な上書きだけを指定します。
 
 ```yaml
-context:
+generation:
   bridge_profile: codex-default
   overrides:
     timeout_seconds: 600
 ```
 
-`context.overrides` は共有プロファイルより優先します。接続先・認証は共有設定で管理し、アプリ固有の上書きだけを記載してください。
+`generation.overrides` は共有プロファイルより優先します。接続先・認証は共有設定で管理し、アプリ固有の上書きだけを記載してください。
 通常の同期、`context sheets`、`context import` では共有プロファイルを解決せず、AIを呼び出しません。
 
 事前に `pull` で代理ノートを作成してください。
@@ -736,9 +784,11 @@ AI 呼び出しは自動再試行しません。失敗・タイムアウト・�
 不明・中断時は `unknown` / `null` とし、判明した部分的な使用量は記録します。
 使用量の記録にはGenAI Bridgeの実行記録、画像ハッシュ、共有プロファイル名、生成条件のハッシュも含めます。生成指示の本文、生成本文、画像本体、認証情報は保存しません。失敗してもGenAI Bridgeから返った使用量と既知の小計を保持します。参考単価が共有設定にある場合は、GenAI Bridgeが計算した参考額も実行記録に残ります。画像化前のdry-runではトークン数・金額を見積もりません。
 
-設定ファイルのトップレベル `context` で生成条件を変更します。省略時は以下の値です。
+旧セクション `context` は読み込み時に `generation` へ変換します。同じファイルでの併記はエラーです。設定層ごとに変換してから優先順位を適用し、ファイル自体は自動変更しません。
 
-| キー（`context.` 以下）                      | 既定値             | 意味・単位                                           |
+設定ファイルのトップレベル `generation` で生成条件を変更します。省略時は以下の値です。
+
+| キー（`generation.` 以下）                      | 既定値             | 意味・単位                                           |
 | ---------------------------------------------- | ------------------ | ---------------------------------------------------- |
 | `bridge_profile`                             | `codex-default`  | GenAI Bridge共有設定のプロファイル名                 |
 | `overrides`                                  | `{}`             | 共有プロファイルに重ねるアプリ固有の設定             |

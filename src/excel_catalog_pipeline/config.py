@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from contextlib import suppress
 from copy import deepcopy
@@ -18,11 +19,11 @@ from .models import AppConfig, ContextConfig, FrontmatterTermFormat, SourceConfi
 from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = "1.0.0"
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
     "sources": {},
-    "context": asdict(ContextConfig()),
+    "generation": asdict(ContextConfig()),
     "sync": {
         "pull_preserves_user_metadata": True,
         "delete_missing_notes": False,
@@ -31,7 +32,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_extracted_text_chars": 12000,
     },
 }
-TOP_LEVEL_KEYS = {"schema_version", "sources", "sync", "context"}
+TOP_LEVEL_KEYS = {"schema_version", "sources", "sync", "generation"}
 SYNC_KEYS = set(DEFAULT_CONFIG["sync"])
 SOURCE_KEYS = {"id", "path", "recursive", "include", "ignore", "notes"}
 NOTES_KEYS = {"root", "profile", "frontmatter_term_format", "rename_adapter"}
@@ -150,16 +151,16 @@ def _context_settings(raw: dict[str, Any]) -> dict[str, Any]:
     values = deepcopy(raw)
     overrides = values.get("overrides", {})
     if not isinstance(overrides, dict):
-        raise ConfigError("context.overrides must be a mapping")
+        raise ConfigError("generation.overrides must be a mapping")
     for name in ("executable", "model", "reasoning_effort", "timeout_seconds"):
         if name not in values:
             continue
         value = values.pop(name)
         if name == "timeout_seconds":
             if type(value) is not int or not 0 < value <= 86400:
-                raise ConfigError("context.timeout_seconds must be an integer between 1 and 86400")
+                raise ConfigError("generation.timeout_seconds must be an integer between 1 and 86400")
         elif not isinstance(value, str) or not value.strip():
-            raise ConfigError(f"context.{name} must be a non-empty string")
+            raise ConfigError(f"generation.{name} must be a non-empty string")
         if name == "reasoning_effort" and value not in {
             "none",
             "minimal",
@@ -170,19 +171,19 @@ def _context_settings(raw: dict[str, Any]) -> dict[str, Any]:
             "max",
             "ultra",
         }:
-            raise ConfigError("context.reasoning_effort is unsupported")
+            raise ConfigError("generation.reasoning_effort is unsupported")
         key = "cli" if name == "executable" else name
         if key in overrides:
-            raise ConfigError(f"Do not mix context.{name} with context.overrides.{key}")
+            raise ConfigError(f"Do not mix generation.{name} with generation.overrides.{key}")
         overrides[key] = {"executable": value} if name == "executable" else value
     for key, value in overrides.items():
         field = Profile.model_fields.get(key)
         if field is None:
-            raise ConfigError(f"Unknown context.overrides key: {key}")
+            raise ConfigError(f"Unknown generation.overrides key: {key}")
         try:
             TypeAdapter(field.rebuild_annotation()).validate_python(value, strict=True)
         except ValidationError:
-            raise ConfigError(f"Invalid context.overrides.{key}") from None
+            raise ConfigError(f"Invalid generation.overrides.{key}") from None
     values["overrides"] = overrides
     return values
 
@@ -221,6 +222,33 @@ def _path_value(value: Any, field: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
+def _normalize_layer(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate each version before merging and normalize legacy keys in memory."""
+    values = deepcopy(data)
+    _reject_unknown(values, TOP_LEVEL_KEYS | {"context"}, "top-level")
+    version = values.get("schema_version", SCHEMA_VERSION)
+    if type(version) is int and version == 1:
+        version = SCHEMA_VERSION
+    if not isinstance(version, str) or not re.fullmatch(
+        r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version
+    ):
+        raise ConfigError("schema_version must be a quoted MAJOR.MINOR.PATCH version")
+    parts = tuple(map(int, version.split(".")))
+    current = tuple(map(int, SCHEMA_VERSION.split(".")))
+    if parts[0] != current[0] or parts > current:
+        raise ConfigError(f"Unsupported schema_version: {version!r}; supported {SCHEMA_VERSION}")
+    values["schema_version"] = SCHEMA_VERSION
+    if "context" in values:
+        if "generation" in values:
+            raise ConfigError("Do not mix context and generation in the same config layer")
+        values["generation"] = values.pop("context")
+    if "generation" in values:
+        if not isinstance(values["generation"], dict):
+            raise ConfigError("generation must be a mapping")
+        values["generation"] = _context_settings(values["generation"])
+    return values
+
+
 def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> AppConfig:
     cwd = (cwd or Path.cwd()).resolve()
     candidates = [global_config_path(), cwd / ".tkn" / "config.yaml"]
@@ -231,9 +259,8 @@ def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> App
     loaded: list[Path] = []
     for path in candidates:
         if path.exists():
-            layer = _read_yaml(path)
-            if isinstance(layer.get("context"), dict):
-                layer["context"] = _context_settings(layer["context"])
+            layer = _normalize_layer(_read_yaml(path))
+            validate_config(_deep_merge(DEFAULT_CONFIG, layer))
             merged = _deep_merge(merged, layer)
             loaded.append(path)
         elif explicit is not None and path == explicit.expanduser().resolve():
@@ -243,11 +270,7 @@ def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> App
 
 
 def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()) -> AppConfig:
-    _reject_unknown(data, TOP_LEVEL_KEYS, "top-level")
-    if data.get("schema_version") != SCHEMA_VERSION:
-        raise ConfigError(
-            f"Unsupported schema_version: {data.get('schema_version')!r}; expected {SCHEMA_VERSION}"
-        )
+    data = _normalize_layer(data)
 
     sync_raw = data.get("sync")
     if not isinstance(sync_raw, dict):
@@ -317,12 +340,12 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
                 rename_adapter=str(notes.get("rename_adapter", "report-only")),
             )
         )
-    context_raw = data.get("context", {})
+    context_raw = data.get("generation", {})
     if not isinstance(context_raw, dict):
-        raise ConfigError("context must be a mapping")
+        raise ConfigError("generation must be a mapping")
     context_raw = _context_settings(context_raw)
     defaults = asdict(ContextConfig())
-    _reject_unknown(context_raw, set(defaults), "context")
+    _reject_unknown(context_raw, set(defaults), "generation")
     context_values = {**defaults, **context_raw}
     for name, default in defaults.items():
         value = context_values[name]
@@ -330,17 +353,17 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
             continue
         if isinstance(default, int):
             if type(value) is not int or value <= 0:
-                raise ConfigError(f"context.{name} must be a positive integer")
+                raise ConfigError(f"generation.{name} must be a positive integer")
         elif not isinstance(value, str) or not value.strip():
-            raise ConfigError(f"context.{name} must be a non-empty string")
+            raise ConfigError(f"generation.{name} must be a non-empty string")
     if context_values["overlap_points"] * 2 >= min(
         context_values["tile_width_points"], context_values["tile_height_points"]
     ):
-        raise ConfigError("context.overlap_points must be less than half the tile dimensions")
+        raise ConfigError("generation.overlap_points must be less than half the tile dimensions")
     if not 72 <= context_values["image_dpi"] <= 300:
-        raise ConfigError("context.image_dpi must be between 72 and 300")
+        raise ConfigError("generation.image_dpi must be between 72 and 300")
     if context_values["max_images"] > 100:
-        raise ConfigError("context.max_images must be at most 100")
+        raise ConfigError("generation.max_images must be at most 100")
     return AppConfig(
         schema_version=SCHEMA_VERSION,
         sources=tuple(sources),
@@ -384,6 +407,6 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
             "allow_source_rename": config.sync.allow_source_rename,
             "max_extracted_text_chars": config.sync.max_extracted_text_chars,
         },
-        "context": asdict(config.context),
+        "generation": asdict(config.context),
         "loadedConfigFiles": [str(path) for path in config.loaded_files],
     }

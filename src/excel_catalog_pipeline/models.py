@@ -82,7 +82,7 @@ class ContextConfig:
 
 @dataclass(frozen=True)
 class AppConfig:
-    schema_version: int
+    schema_version: str
     sources: tuple[SourceConfig, ...]
     sync: SyncConfig
     loaded_files: tuple[Path, ...] = ()

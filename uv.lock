@@ -2375,7 +2375,7 @@ wheels = [
 
 [[package]]
 name = "tkn-excel-catalog-pipeline"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "pillow", marker = "sys_platform == 'win32'" },

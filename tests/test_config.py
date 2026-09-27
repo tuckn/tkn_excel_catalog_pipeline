@@ -315,7 +315,7 @@ def test_duplicate_yaml_keys_are_rejected(
 def test_legacy_context_settings_become_explicit_bridge_overrides():
     data = {
         **config_module.DEFAULT_CONFIG,
-        "context": {
+        "generation": {
             "executable": "fixture.exe",
             "model": "fixture-model",
             "reasoning_effort": "high",
@@ -330,7 +330,7 @@ def test_legacy_context_settings_become_explicit_bridge_overrides():
         "reasoning_effort": "high",
         "timeout_seconds": 600,
     }
-    assert "model" not in config_module.config_as_dict(config)["context"]
+    assert "model" not in config_module.config_as_dict(config)["generation"]
     assert config_module.validate_config(config_module.DEFAULT_CONFIG).context.overrides == {}
 
 
@@ -363,4 +363,59 @@ def test_legacy_context_conversion_respects_layer_precedence(tmp_path, monkeypat
 )
 def test_bridge_context_settings_are_strict(settings):
     with pytest.raises(ConfigError):
-        config_module.validate_config({**config_module.DEFAULT_CONFIG, "context": settings})
+        config_module.validate_config({**config_module.DEFAULT_CONFIG, "generation": settings})
+
+
+@pytest.mark.parametrize("version", [1, "1.0.0"])
+def test_schema_version_normalizes_to_semver(version):
+    config = config_module.validate_config({**config_module.DEFAULT_CONFIG, "schema_version": version})
+    assert config.schema_version == "1.0.0"
+    assert config_as_dict(config)["schema_version"] == "1.0.0"
+
+
+@pytest.mark.parametrize("version", [True, 1.0, None, "1", "01.0.0", "1.0", "1.0.0-rc.1", "1.0.0+build", "0.9.0", "2.0.0", "1.1.0", "1.0.1"])
+def test_invalid_or_unsupported_schema_version(version):
+    with pytest.raises(ConfigError, match="schema_version"):
+        config_module.validate_config({**config_module.DEFAULT_CONFIG, "schema_version": version})
+
+
+@pytest.mark.parametrize("old_key,new_key", [("context", "generation"), ("generation", "context")])
+def test_generation_alias_layer_precedence(tmp_path, monkeypatch, old_key, new_key):
+    shared = tmp_path / "shared.yaml"
+    shared.write_text(f"schema_version: 1\n{old_key}:\n  bridge_profile: base\n  language: English\n")
+    explicit = tmp_path / "explicit.yaml"
+    explicit.write_text(f'schema_version: "1.0.0"\n{new_key}:\n  bridge_profile: codex-high\n')
+    monkeypatch.setattr(config_module, "global_config_path", lambda: shared)
+    before = shared.read_bytes(), explicit.read_bytes()
+    config = load_config(cwd=tmp_path, explicit=explicit)
+    assert config.context.bridge_profile == "codex-high"
+    assert config.context.language == "English"
+    rendered = config_as_dict(config)
+    assert "context" not in rendered
+    assert rendered["generation"]["bridge_profile"] == "codex-high"
+    assert (shared.read_bytes(), explicit.read_bytes()) == before
+
+
+def test_generation_alias_collision_rejected():
+    with pytest.raises(ConfigError, match="Do not mix context and generation"):
+        config_module.validate_config({**config_module.DEFAULT_CONFIG, "context": {}})
+
+
+@pytest.mark.parametrize("invalid", ['schema_version: "2.0.0"', 'generation: {max_images: false}', 'generation: {typo: 1}'])
+def test_invalid_lower_layer_cannot_be_hidden(tmp_path, monkeypatch, invalid):
+    shared = tmp_path / "shared.yaml"
+    shared.write_text(invalid + "\n")
+    explicit = tmp_path / "explicit.yaml"
+    explicit.write_text('schema_version: "1.0.0"\ngeneration: {max_images: 24}\n')
+    monkeypatch.setattr(config_module, "global_config_path", lambda: shared)
+    with pytest.raises(ConfigError):
+        load_config(cwd=tmp_path, explicit=explicit)
+
+
+def test_template_uses_current_schema_and_generation():
+    import yaml
+
+    data = yaml.safe_load(config_template_text())
+    assert data["schema_version"] == "1.0.0"
+    assert "generation" in data and "context" not in data
+    config_module.validate_config(data)

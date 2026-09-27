@@ -164,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
         "pull",
         help="Apply Excel-to-Markdown changes; use --dry-run to preview.",
         description=(
-            "Apply Excel-to-Markdown changes. Normal execution writes proxy notes and "
+            "Apply Excel-to-Markdown changes. Normal execution writes proxy notes, PNG cover attachments, and "
             "synchronization state; use --dry-run for a read-only preview."
         ),
     )
@@ -351,6 +351,8 @@ def _log_push_action(logger: logging.Logger, action: Action) -> None:
 
 
 def _log_pull_action(logger: logging.Logger, action: Action) -> None:
+    for warning in action.details.get("warnings", []):
+        logger.warning("[%s] %s", action.status, _one_line(str(warning)))
     if action.status == "unchanged":
         return
     if action.status in {"created", "updated"}:

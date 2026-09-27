@@ -99,7 +99,7 @@ def test_image_limit_fails_instead_of_truncating() -> None:
 )
 def test_context_config_is_strict(values: dict) -> None:
     with pytest.raises(ConfigError):
-        validate_config({**DEFAULT_CONFIG, "context": values})
+        validate_config({**DEFAULT_CONFIG, "generation": values})
 
 
 @pytest.fixture

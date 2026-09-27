@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: "1.0.0"
 
 sources:
   personal-excel:
@@ -24,7 +24,7 @@ sync:
 # Only explicit `context build` uses GenAI Bridge. Normal pull remains local.
 # Connections/models/authentication: ~/.tkn/genai_bridge/config.yaml.
 # Images always live in each proxy note's sibling img/ directory, with relative links.
-context:
+generation:
   bridge_profile: codex-default
   overrides: {}
   # Example per-application override:

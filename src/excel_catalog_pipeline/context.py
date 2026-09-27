@@ -54,7 +54,7 @@ def resolve_workbook(source: SourceConfig, selector: str, config: ContextConfig)
     if path.suffix.lower() not in {".xlsx", ".xlsm"} or not path.is_file():
         raise ContextError("Select an existing .xlsx or .xlsm workbook")
     if path.stat().st_size > config.max_workbook_mb * 1024 * 1024:
-        raise ContextError("Workbook exceeds context.max_workbook_mb")
+        raise ContextError("Workbook exceeds generation.max_workbook_mb")
     return path
 
 
@@ -190,7 +190,7 @@ def build_context(
     ]
     for evidence in prepared:
         if len(json.dumps(evidence, ensure_ascii=False)) > config.max_input_chars:
-            raise ContextError("Evidence exceeds context.max_input_chars; no AI was called")
+            raise ContextError("Evidence exceeds generation.max_input_chars; no AI was called")
     logger.info(
         "Reading a saved-file snapshot; unsaved edits in Excel are not included. SHA256=%s",
         digest(data),

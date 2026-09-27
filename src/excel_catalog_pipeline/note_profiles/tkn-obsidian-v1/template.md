@@ -3,6 +3,7 @@ type: Excel
 schemaVersion: "2.1"
 title: {{ title }}
 description: {{ description }}
+cover: {{ cover }}
 subject: {{ subject }}
 author: {{ author }}
 keywords: {{ keywords }}
