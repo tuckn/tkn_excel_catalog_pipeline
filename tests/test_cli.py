@@ -18,6 +18,76 @@ def test_cli_uses_tkn_prefixed_program_name() -> None:
     assert cli_module.build_parser().prog == "tkn-excel-catalog"
 
 
+def test_workbook_list_sheets_reads_saved_names_without_creating_notes(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    workbooks = tmp_path / "workbooks"
+    notes = tmp_path / "notes"
+    workbook = create_workbook(workbooks / "book.xlsx")
+    original_bytes = workbook.read_bytes()
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f'''schema_version: "1.1.0"
+sources:
+  example:
+    workbooks_dir: "{workbooks.as_posix()}"
+    notes:
+      dir: "{notes.as_posix()}"
+''',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "user.yaml")
+
+    result = main(
+        [
+            "--config",
+            str(config),
+            "workbook",
+            "list-sheets",
+            "--source",
+            "example",
+            "--workbook",
+            "book.xlsx",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert json.loads(captured.out) == {
+        "command": "workbook list-sheets",
+        "status": "success",
+        "sheets": [
+            {
+                "name": "Data",
+                "id": "1",
+                "state": "visible",
+                "part": "xl/worksheets/sheet1.xml",
+            }
+        ],
+    }
+    assert len(captured.out.splitlines()) == 1
+    assert workbook.read_bytes() == original_bytes
+    assert not notes.exists()
+    assert not (tmp_path / "state").exists()
+
+
+def test_context_import_command_is_not_available() -> None:
+    with pytest.raises(SystemExit) as failure:
+        cli_module.build_parser().parse_args(
+            ["context", "import", "--source", "example", "--workbook", "book.xlsx",
+             "--sheet", "Data", "--markdown", "Data.md"]
+        )
+    assert failure.value.code == 2
+
+
+def test_old_context_sheets_command_is_not_available() -> None:
+    with pytest.raises(SystemExit) as failure:
+        cli_module.build_parser().parse_args(
+            ["context", "sheets", "--source", "example", "--workbook", "book.xlsx"]
+        )
+    assert failure.value.code == 2
+
+
 def test_mutating_command_help_explains_normal_write_and_dry_run(capsys) -> None:  # type: ignore[no-untyped-def]
     with pytest.raises(SystemExit) as exc_info:
         main(["pull", "--help"])
@@ -47,7 +117,7 @@ def test_config_show_prints_path_before_indented_json(monkeypatch, tmp_path: Pat
     assert payload["command"] == "config show"
     assert payload["config"]["loadedConfigFiles"] == [str(config.resolve())]
     assert payload["config"]["sources"] == {}
-    assert '\n  "config": {\n    "schema_version": "1.0.0",' in body
+    assert '\n  "config": {\n    "schema_version": "1.1.0",' in body
     assert captured.err == ""
 
 
@@ -292,11 +362,11 @@ sources:
     assert captured.out == ""
     assert "[INFO] Running push for 1 configured source(s): example." in captured.err
     assert '[INFO] Selected source configuration:\n  "example":' in captured.err
-    assert f"    path: '{workbooks.resolve()}'" in captured.err
+    assert f"    workbooks_dir: '{workbooks.resolve()}'" in captured.err
     assert "    recursive: false" in captured.err
     assert '      - "**/*.xlsx"' in captured.err
     assert "    ignore: []" in captured.err
-    assert f"      root: '{notes.resolve()}'" in captured.err
+    assert f"      dir: '{notes.resolve()}'" in captured.err
     assert "      profile: tkn-obsidian-v1" in captured.err
     assert "      frontmatter_term_format: obsidian-link" in captured.err
     assert "      rename_adapter: report-only" in captured.err
@@ -524,4 +594,7 @@ def test_config_show_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> No
     payload = json.loads(captured.out.split("\n\n", 1)[1])
     assert list(payload["config"]["sources"]) == ["example"]
     assert "id" not in payload["config"]["sources"]["example"]
+    assert "workbooks_dir" in payload["config"]["sources"]["example"]
+    assert "path" not in payload["config"]["sources"]["example"]
+    assert "dir" in payload["config"]["sources"]["example"]["notes"]
     assert captured.err == ""

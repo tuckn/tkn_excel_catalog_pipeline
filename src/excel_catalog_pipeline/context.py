@@ -22,6 +22,7 @@ from tkn_genai_bridge import Profile
 
 from .adapters.markdown import discover_notes
 from .adapters.ooxml import read_custom_properties
+from .context_profiles import prompt_digest
 from .context_provider import (
     PROMPT_VERSION,
     atomic_json,
@@ -218,7 +219,7 @@ def build_context(
             if old_block and state.get("origin") == "import" and not force:
                 if not _assets_intact(note, state):
                     raise ContextError(
-                        "Imported context assets are missing or modified; re-import the source Markdown to repair them."
+                        "Imported context assets are missing or modified; restore the saved assets or use --force to replace the context by generation."
                     )
                 result["status"] = "retained"
                 logger.info(
@@ -248,6 +249,7 @@ def build_context(
                             )
                         },
                         "promptVersion": PROMPT_VERSION,
+                        "promptSha256": prompt_digest(config),
                     },
                     sort_keys=True,
                 ).encode()
@@ -401,7 +403,7 @@ def run_context(
     data = read_shared(workbook)
     sheets = sheet_list(data)
     if list_only:
-        return {"command": "context sheets", "status": "success", "sheets": sheets}
+        return {"command": "workbook list-sheets", "status": "success", "sheets": sheets}
     names = list(dict.fromkeys(sheet_names))
     unknown = set(names) - {sheet["name"] for sheet in sheets}
     if unknown:

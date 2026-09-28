@@ -75,6 +75,8 @@ def test_source_traversal_defaults_are_non_recursive(tmp_path: Path) -> None:
     assert source.ignore == ()
     assert source.frontmatter_term_format == "obsidian-link"
     rendered = config_as_dict(loaded)["sources"]["example"]
+    assert rendered["workbooks_dir"] == str((tmp_path / "source").resolve())
+    assert rendered["notes"]["dir"] == str((tmp_path / "notes").resolve())
     assert rendered["recursive"] is False
     assert rendered["ignore"] == []
     assert rendered["notes"]["frontmatter_term_format"] == "obsidian-link"
@@ -312,42 +314,38 @@ def test_duplicate_yaml_keys_are_rejected(
         load_config(explicit=path, cwd=tmp_path)
 
 
-def test_legacy_context_settings_become_explicit_bridge_overrides():
+def test_generation_bridge_overrides_are_preserved():
     data = {
         **config_module.DEFAULT_CONFIG,
         "generation": {
-            "executable": "fixture.exe",
-            "model": "fixture-model",
-            "reasoning_effort": "high",
-            "timeout_seconds": 600,
+            "overrides": {
+                "cli": {"executable": "fixture.exe"},
+                "model": "fixture-model",
+                "reasoning_effort": "high",
+                "timeout_seconds": 600,
+            },
         },
     }
     config = config_module.validate_config(data)
     assert config.context.bridge_profile == "codex-default"
-    assert config.context.overrides == {
-        "cli": {"executable": "fixture.exe"},
-        "model": "fixture-model",
-        "reasoning_effort": "high",
-        "timeout_seconds": 600,
-    }
-    assert "model" not in config_module.config_as_dict(config)["generation"]
-    assert config_module.validate_config(config_module.DEFAULT_CONFIG).context.overrides == {}
+    assert config.context.overrides == data["generation"]["overrides"]
+    assert config_module.config_as_dict(config)["generation"]["overrides"] == data["generation"]["overrides"]
 
 
-def test_legacy_context_conversion_respects_layer_precedence(tmp_path, monkeypatch):
+def test_generation_layer_precedence(tmp_path, monkeypatch):
     shared = tmp_path / "global.yaml"
-    shared.write_text("context:\n  model: old-model\n  timeout_seconds: 600\n")
+    shared.write_text("generation:\n  overrides:\n    model: base-model\n    timeout_seconds: 600\n")
     project = tmp_path / ".tkn" / "config.yaml"
     project.parent.mkdir()
-    project.write_text("context:\n  overrides:\n    model: project-model\n")
+    project.write_text("generation:\n  overrides:\n    model: project-model\n")
     explicit = tmp_path / "explicit.yaml"
-    explicit.write_text("context:\n  model: explicit-model\n")
+    explicit.write_text("generation:\n  overrides:\n    model: explicit-model\n")
     monkeypatch.setattr(config_module, "global_config_path", lambda: shared)
-    before = shared.read_bytes()
+    before = shared.read_bytes(), project.read_bytes(), explicit.read_bytes()
     assert load_config(cwd=tmp_path).context.overrides["model"] == "project-model"
     config = load_config(cwd=tmp_path, explicit=explicit)
     assert config.context.overrides == {"model": "explicit-model", "timeout_seconds": 600}
-    assert shared.read_bytes() == before
+    assert (shared.read_bytes(), project.read_bytes(), explicit.read_bytes()) == before
 
 
 @pytest.mark.parametrize(
@@ -358,7 +356,10 @@ def test_legacy_context_conversion_respects_layer_precedence(tmp_path, monkeypat
         {"overrides": {"bad": 1}},
         {"overrides": {"timeout_seconds": -1}},
         {"overrides": {"cli": {"unknown": "x"}}},
-        {"model": "old", "overrides": {"model": "new"}},
+        {"model": "old"},
+        {"executable": "old"},
+        {"reasoning_effort": "high"},
+        {"timeout_seconds": 600},
     ],
 )
 def test_bridge_context_settings_are_strict(settings):
@@ -366,39 +367,32 @@ def test_bridge_context_settings_are_strict(settings):
         config_module.validate_config({**config_module.DEFAULT_CONFIG, "generation": settings})
 
 
-@pytest.mark.parametrize("version", [1, "1.0.0"])
+@pytest.mark.parametrize("version", [1, "1.1.0"])
 def test_schema_version_normalizes_to_semver(version):
     config = config_module.validate_config({**config_module.DEFAULT_CONFIG, "schema_version": version})
-    assert config.schema_version == "1.0.0"
-    assert config_as_dict(config)["schema_version"] == "1.0.0"
+    assert config.schema_version == "1.1.0"
+    assert config_as_dict(config)["schema_version"] == "1.1.0"
 
 
-@pytest.mark.parametrize("version", [True, 1.0, None, "1", "01.0.0", "1.0", "1.0.0-rc.1", "1.0.0+build", "0.9.0", "2.0.0", "1.1.0", "1.0.1"])
+@pytest.mark.parametrize("version", [True, 1.0, None, "1", "01.0.0", "1.0", "1.0.0-rc.1", "1.0.0+build", "0.9.0", "2.0.0", "1.2.0", "1.1.1"])
 def test_invalid_or_unsupported_schema_version(version):
     with pytest.raises(ConfigError, match="schema_version"):
         config_module.validate_config({**config_module.DEFAULT_CONFIG, "schema_version": version})
 
 
-@pytest.mark.parametrize("old_key,new_key", [("context", "generation"), ("generation", "context")])
-def test_generation_alias_layer_precedence(tmp_path, monkeypatch, old_key, new_key):
-    shared = tmp_path / "shared.yaml"
-    shared.write_text(f"schema_version: 1\n{old_key}:\n  bridge_profile: base\n  language: English\n")
-    explicit = tmp_path / "explicit.yaml"
-    explicit.write_text(f'schema_version: "1.0.0"\n{new_key}:\n  bridge_profile: codex-high\n')
-    monkeypatch.setattr(config_module, "global_config_path", lambda: shared)
-    before = shared.read_bytes(), explicit.read_bytes()
-    config = load_config(cwd=tmp_path, explicit=explicit)
-    assert config.context.bridge_profile == "codex-high"
-    assert config.context.language == "English"
-    rendered = config_as_dict(config)
-    assert "context" not in rendered
-    assert rendered["generation"]["bridge_profile"] == "codex-high"
-    assert (shared.read_bytes(), explicit.read_bytes()) == before
-
-
-def test_generation_alias_collision_rejected():
-    with pytest.raises(ConfigError, match="Do not mix context and generation"):
+def test_context_config_section_is_rejected():
+    with pytest.raises(ConfigError, match="Unknown top-level key\\(s\\): context"):
         config_module.validate_config({**config_module.DEFAULT_CONFIG, "context": {}})
+
+
+def test_context_config_layer_is_rejected(tmp_path, monkeypatch):
+    shared = tmp_path / "shared.yaml"
+    shared.write_text("context:\n  language: English\n")
+    explicit = tmp_path / "explicit.yaml"
+    explicit.write_text("generation:\n  language: Japanese\n")
+    monkeypatch.setattr(config_module, "global_config_path", lambda: shared)
+    with pytest.raises(ConfigError, match="Unknown top-level key\\(s\\): context"):
+        load_config(cwd=tmp_path, explicit=explicit)
 
 
 @pytest.mark.parametrize("invalid", ['schema_version: "2.0.0"', 'generation: {max_images: false}', 'generation: {typo: 1}'])
@@ -406,7 +400,7 @@ def test_invalid_lower_layer_cannot_be_hidden(tmp_path, monkeypatch, invalid):
     shared = tmp_path / "shared.yaml"
     shared.write_text(invalid + "\n")
     explicit = tmp_path / "explicit.yaml"
-    explicit.write_text('schema_version: "1.0.0"\ngeneration: {max_images: 24}\n')
+    explicit.write_text('schema_version: "1.1.0"\ngeneration: {max_images: 24}\n')
     monkeypatch.setattr(config_module, "global_config_path", lambda: shared)
     with pytest.raises(ConfigError):
         load_config(cwd=tmp_path, explicit=explicit)
@@ -416,6 +410,43 @@ def test_template_uses_current_schema_and_generation():
     import yaml
 
     data = yaml.safe_load(config_template_text())
-    assert data["schema_version"] == "1.0.0"
+    assert data["schema_version"] == "1.1.0"
     assert "generation" in data and "context" not in data
     config_module.validate_config(data)
+
+
+def test_new_directory_names_validate_and_render(tmp_path: Path) -> None:
+    source_dir = tmp_path / "workbooks"
+    note_dir = tmp_path / "notes"
+    config = config_module.validate_config(
+        {
+            **config_module.DEFAULT_CONFIG,
+            "sources": {
+                "example": {
+                    "workbooks_dir": str(source_dir),
+                    "notes": {"dir": str(note_dir)},
+                }
+            },
+        }
+    )
+    assert config.sources[0].path == source_dir.resolve()
+    assert config.sources[0].note_root == note_dir.resolve()
+    output = config_as_dict(config)["sources"]["example"]
+    assert output["workbooks_dir"] == str(source_dir.resolve())
+    assert output["notes"]["dir"] == str(note_dir.resolve())
+    assert "path" not in output and "root" not in output["notes"]
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ({"path": "old"}, "Do not mix path and workbooks_dir"),
+        ({"notes": {"dir": "new", "root": "old"}}, "Do not mix notes.root and notes.dir"),
+    ],
+)
+def test_mixed_directory_names_are_rejected(extra: dict, message: str) -> None:
+    source = {"workbooks_dir": "new", "notes": {"dir": "new"}, **extra}
+    with pytest.raises(ConfigError, match=message):
+        config_module.validate_config(
+            {**config_module.DEFAULT_CONFIG, "sources": {"example": source}}
+        )

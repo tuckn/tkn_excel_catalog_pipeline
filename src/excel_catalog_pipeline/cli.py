@@ -8,15 +8,16 @@ import logging
 import os
 import sys
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from . import __version__
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
 from .context import run_context
-from .context_import import import_context
 from .context_source import ContextError
 from .deletion import run_delete_notes
+from .export import export_workbook
 from .models import Action, SourceConfig
 from .pipeline import run_adopt, run_pull, run_push, run_status
 from .reports import summarize_actions, write_report
@@ -136,6 +137,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-color", action="store_true")
 
     commands = parser.add_subparsers(dest="command", required=True)
+    exporter = commands.add_parser(
+        "export", help="Convert one workbook to standalone Markdown without synchronization."
+    )
+    exporter.add_argument("workbook", type=Path)
+    exporter.add_argument("--output", type=Path, required=True)
+    exporter.add_argument(
+        "--profile",
+        choices=("default-ja", "default-en"),
+        help="Prompt profile; separate from generation.bridge_profile.",
+    )
+    exporter.add_argument(
+        "--sheet",
+        action="append",
+        default=[],
+        help="Exact sheet name, repeatable. Default: all visible worksheets.",
+    )
+    exporter.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate without rendering, AI calls, or persistent writes.",
+    )
+    exporter.add_argument(
+        "--force",
+        action="store_true",
+        help="Intentionally replace an existing output Markdown file.",
+    )
     config_parser = commands.add_parser("config", help="Create or inspect configuration.")
     config_commands = config_parser.add_subparsers(dest="config_command", required=True)
     config_commands.add_parser(
@@ -234,70 +261,52 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common(adopt)
     _add_execution_mode(adopt, legacy_write_option="--write-excel")
+    workbook = commands.add_parser("workbook", help="Inspect saved workbooks without writes.")
+    workbook_commands = workbook.add_subparsers(dest="workbook_command", required=True)
+    list_sheets = workbook_commands.add_parser(
+        "list-sheets", help="List saved worksheet names without AI or writes."
+    )
+    list_sheets.add_argument("--source", required=True, help="Configured source id.")
+    list_sheets.add_argument(
+        "--workbook", required=True, help="Workbook path, absolute or relative to the source root."
+    )
     context = commands.add_parser(
         "context", help="Extract visual sheet context through GenAI Bridge; never run by pull."
     )
     context_commands = context.add_subparsers(dest="context_command", required=True)
-    for name, help_text in (
-        ("sheets", "List saved worksheet names without AI or writes."),
-        ("build", "Render selected sheets and write AI context to the proxy note."),
-    ):
-        command = context_commands.add_parser(name, help=help_text)
-        command.add_argument("--source", required=True, help="Configured source id.")
-        command.add_argument(
-            "--workbook",
-            required=True,
-            help="Workbook path, absolute or relative to the source root.",
-        )
-        if name == "build":
-            selection = command.add_mutually_exclusive_group(required=True)
-            selection.add_argument(
-                "--sheet",
-                action="append",
-                default=[],
-                help="Exact sheet name; repeatable (including hidden sheets).",
-            )
-            selection.add_argument(
-                "--all-sheets",
-                action="store_true",
-                help="Explicitly process all visible worksheets.",
-            )
-            command.add_argument(
-                "--dry-run",
-                action="store_true",
-                help="Validate selection and existing output without rendering, AI calls, or persistent writes.",
-            )
-            command.add_argument(
-                "--force",
-                action="store_true",
-                help="Regenerate even if cached; intentionally replace edits inside selected context blocks.",
-            )
-    importer = context_commands.add_parser(
-        "import", help="Import existing sheet Markdown and images without AI."
+    build = context_commands.add_parser(
+        "build", help="Render selected sheets and write AI context to the proxy note."
     )
-    importer.add_argument("--source", required=True, help="Configured source id.")
-    importer.add_argument(
-        "--workbook", required=True, help="Workbook path inside the selected source."
+    build.add_argument("--source", required=True, help="Configured source id.")
+    build.add_argument(
+        "--workbook", required=True, help="Workbook path, absolute or relative to the source root."
     )
-    importer.add_argument("--sheet", required=True, help="Exact sheet name.")
-    importer.add_argument(
-        "--markdown",
-        required=True,
-        type=Path,
-        help="Existing Markdown with one H1 title and relative image links.",
+    build.add_argument(
+        "--profile",
+        choices=("default-ja", "default-en"),
+        help="Override the generation prompt profile.",
     )
-    importer.add_argument(
-        "--description", help="Explicitly replace the proxy Frontmatter description."
+    selection = build.add_mutually_exclusive_group(required=True)
+    selection.add_argument(
+        "--sheet",
+        action="append",
+        default=[],
+        help="Exact sheet name; repeatable (including hidden sheets).",
     )
-    importer.add_argument(
+    selection.add_argument(
+        "--all-sheets",
+        action="store_true",
+        help="Explicitly process all visible worksheets.",
+    )
+    build.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate import and layout migration without persistent writes or AI.",
+        help="Validate selection and existing output without rendering, AI calls, or persistent writes.",
     )
-    importer.add_argument(
+    build.add_argument(
         "--force",
         action="store_true",
-        help="Intentionally replace edited context or restore modified imported images.",
+        help="Regenerate even if cached; intentionally replace edits inside selected context blocks.",
     )
     return parser
 
@@ -328,7 +337,7 @@ def _log_source_configuration(logger: logging.Logger, sources: tuple[SourceConfi
         lines.extend(
             [
                 f"  {json.dumps(source.id, ensure_ascii=False)}:",
-                f"    path: {_yaml_single_quoted(str(source.path))}",
+                f"    workbooks_dir: {_yaml_single_quoted(str(source.path))}",
                 f"    recursive: {str(source.recursive).lower()}",
                 "    include:",
                 *(f"      - {json.dumps(pattern)}" for pattern in source.include),
@@ -341,7 +350,7 @@ def _log_source_configuration(logger: logging.Logger, sources: tuple[SourceConfi
                     else ["    ignore: []"]
                 ),
                 "    notes:",
-                f"      root: {_yaml_single_quoted(str(source.note_root))}",
+                f"      dir: {_yaml_single_quoted(str(source.note_root))}",
                 f"      profile: {source.profile}",
                 f"      frontmatter_term_format: {source.frontmatter_term_format}",
                 f"      rename_adapter: {source.rename_adapter}",
@@ -605,38 +614,47 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
+        if args.command == "export":
+            settings = (
+                replace(config.context, prompt_profile=args.profile)
+                if args.profile
+                else config.context
+            )
+            result = export_workbook(
+                args.workbook,
+                args.output,
+                settings,
+                logger,
+                sheet_names=args.sheet,
+                dry_run=args.dry_run,
+                force=args.force,
+            )
+            _emit(result)
+            return 0
+        if args.command == "context" and getattr(args, "profile", None):
+            config = replace(config, context=replace(config.context, prompt_profile=args.profile))
         sources = select_sources(config, args.source)
         if not sources:
             raise ConfigError("No sources are configured")
-        if args.command == "context":
+        if args.command in {"context", "workbook"}:
             if args.report_dir:
-                logger.warning(
-                    "--report-dir does not apply to context; usage records use application state."
-                )
-            if args.context_command == "import":
-                result = import_context(
-                    sources[0],
-                    config.context,
-                    workbook_selector=args.workbook,
-                    sheet_name=args.sheet,
-                    markdown_path=args.markdown,
-                    dry_run=args.dry_run,
-                    force=args.force,
-                    description=args.description,
-                    logger=logger,
-                )
-            else:
-                result = run_context(
-                    sources[0],
-                    config.context,
-                    workbook_selector=args.workbook,
-                    sheet_names=getattr(args, "sheet", []),
-                    all_sheets=getattr(args, "all_sheets", False),
-                    list_only=args.context_command == "sheets",
-                    dry_run=getattr(args, "dry_run", False),
-                    force=getattr(args, "force", False),
-                    logger=logger,
-                )
+                if args.command == "context":
+                    logger.warning(
+                        "--report-dir does not apply to context; usage records use application state."
+                    )
+                else:
+                    logger.warning("--report-dir does not apply to workbook list-sheets.")
+            result = run_context(
+                sources[0],
+                config.context,
+                workbook_selector=args.workbook,
+                sheet_names=getattr(args, "sheet", []),
+                all_sheets=getattr(args, "all_sheets", False),
+                list_only=args.command == "workbook",
+                dry_run=getattr(args, "dry_run", False),
+                force=getattr(args, "force", False),
+                logger=logger,
+            )
             _emit(result)
             return 1 if result["status"] == "error" else 0
         report_root = args.report_dir.expanduser().resolve() if args.report_dir else None
@@ -739,7 +757,7 @@ def main(argv: list[str] | None = None) -> int:
         return _exit_code(summary)
     except (ConfigError, StateError, ContextError) as exc:
         logger.error("%s", exc)
-        if args.command in {"config", "context", "delete-notes"}:
+        if args.command in {"config", "context", "workbook", "delete-notes", "export"}:
             _emit({"status": "config-error", "command": args.command, "message": str(exc)})
         return 3
     except Exception as exc:  # pragma: no cover - last-resort CLI boundary
@@ -747,6 +765,6 @@ def main(argv: list[str] | None = None) -> int:
             logger.exception("Unexpected failure")
         else:
             logger.error("Unexpected failure: %s", exc)
-        if args.command in {"config", "context", "delete-notes"}:
+        if args.command in {"config", "context", "workbook", "delete-notes", "export"}:
             _emit({"status": "error", "command": args.command, "message": str(exc)})
         return 1

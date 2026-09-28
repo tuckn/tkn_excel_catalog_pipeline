@@ -198,6 +198,28 @@ def test_build_preserves_bytes_outside_block_and_reuses_cache(build_setup) -> No
     assert (note.parent / images[0].relative_to(note.parent)).exists()
 
 
+def test_existing_imported_context_is_retained_without_ai(build_setup, monkeypatch) -> None:
+    _, _, note, state_root, calls, run = build_setup
+    run()
+    state_path = next(state_root.rglob("sheet-1.json"))
+    recorded = json.loads(state_path.read_text(encoding="utf-8"))
+    recorded["origin"] = "import"
+    state_path.write_text(json.dumps(recorded), encoding="utf-8")
+    before = note.read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Existing imported context must not call AI or render Excel")
+
+    monkeypatch.setattr(context, "render_sheet", forbidden)
+    monkeypatch.setattr(context, "generate_markdown", forbidden)
+    monkeypatch.setattr(context, "resolve_profile", forbidden)
+    result = run()
+    assert result["results"][0]["status"] == "retained"
+    assert result["usage"]["calls"] == 0
+    assert note.read_bytes() == before
+    assert calls == ["Data"]
+
+
 def test_edited_context_is_protected_until_force(build_setup) -> None:
     _, _, note, _, calls, run = build_setup
     run()

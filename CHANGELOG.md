@@ -8,6 +8,19 @@ Git 履歴で独立したバージョン更新を確認できない版は掲載�
 
 ## [Unreleased]
 
+### 0.9.0
+
+- `context import` コマンドを廃止。過去に取り込んだシート説明は保持し、通常の `context build` による上書きも引き続き防止。
+
+- 読み取り専用のシート一覧コマンドを `context sheets` から `workbook list-sheets` に変更。
+
+- 設定名を `sources.<id>.workbooks_dir` と `sources.<id>.notes.dir` に変更。旧名の読み込みを維持し、設定の表示・同梱例は新名に統一。設定形式は `1.1.0`。
+
+- 同期設定不要の `export <workbook> --output <markdown>` を追加。シート画像解析とブック全体の統合で AI context 用 Markdown を生成。
+- 日英の生成プロンプトを `context_profiles/default-ja` / `default-en` に外出し。`export` と `context build` の `--profile`、設定の `generation.prompt_profile` に対応。
+- 書き込みなしの dry-run、既存出力の明示的な上書き、生成中の変更検知、出典画像・プロンプトハッシュ・使用量記録を追加。
+
+
 ### 追加
 
 - `delete-notes` を追加。元ブックが存在しない代理ノートを名前・パスで個別指定、または `--all-missing` で一括指定して削除できる。`--dry-run` で保存せずに確認可能。

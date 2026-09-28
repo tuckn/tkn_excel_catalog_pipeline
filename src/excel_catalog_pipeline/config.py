@@ -19,7 +19,7 @@ from .models import AppConfig, ContextConfig, FrontmatterTermFormat, SourceConfi
 from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
     "sources": {},
@@ -34,8 +34,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 TOP_LEVEL_KEYS = {"schema_version", "sources", "sync", "generation"}
 SYNC_KEYS = set(DEFAULT_CONFIG["sync"])
-SOURCE_KEYS = {"id", "path", "recursive", "include", "ignore", "notes"}
-NOTES_KEYS = {"root", "profile", "frontmatter_term_format", "rename_adapter"}
+SOURCE_KEYS = {"id", "workbooks_dir", "recursive", "include", "ignore", "notes"}
+NOTES_KEYS = {"dir", "profile", "frontmatter_term_format", "rename_adapter"}
 FRONTMATTER_TERM_FORMATS = {"obsidian-link", "plain"}
 
 
@@ -146,36 +146,12 @@ def init_user_config(*, force: bool = False, target: Path | None = None) -> tupl
     return status, destination
 
 
-def _context_settings(raw: dict[str, Any]) -> dict[str, Any]:
-    """Translate explicit legacy options per layer; never rewrite a user file."""
+def _generation_settings(raw: dict[str, Any]) -> dict[str, Any]:
+    """Validate Bridge overrides in one config layer."""
     values = deepcopy(raw)
     overrides = values.get("overrides", {})
     if not isinstance(overrides, dict):
         raise ConfigError("generation.overrides must be a mapping")
-    for name in ("executable", "model", "reasoning_effort", "timeout_seconds"):
-        if name not in values:
-            continue
-        value = values.pop(name)
-        if name == "timeout_seconds":
-            if type(value) is not int or not 0 < value <= 86400:
-                raise ConfigError("generation.timeout_seconds must be an integer between 1 and 86400")
-        elif not isinstance(value, str) or not value.strip():
-            raise ConfigError(f"generation.{name} must be a non-empty string")
-        if name == "reasoning_effort" and value not in {
-            "none",
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max",
-            "ultra",
-        }:
-            raise ConfigError("generation.reasoning_effort is unsupported")
-        key = "cli" if name == "executable" else name
-        if key in overrides:
-            raise ConfigError(f"Do not mix generation.{name} with generation.overrides.{key}")
-        overrides[key] = {"executable": value} if name == "executable" else value
     for key, value in overrides.items():
         field = Profile.model_fields.get(key)
         if field is None:
@@ -223,9 +199,9 @@ def _path_value(value: Any, field: str) -> Path:
 
 
 def _normalize_layer(data: dict[str, Any]) -> dict[str, Any]:
-    """Validate each version before merging and normalize legacy keys in memory."""
+    """Validate each version before merging config layers."""
     values = deepcopy(data)
-    _reject_unknown(values, TOP_LEVEL_KEYS | {"context"}, "top-level")
+    _reject_unknown(values, TOP_LEVEL_KEYS, "top-level")
     version = values.get("schema_version", SCHEMA_VERSION)
     if type(version) is int and version == 1:
         version = SCHEMA_VERSION
@@ -238,14 +214,26 @@ def _normalize_layer(data: dict[str, Any]) -> dict[str, Any]:
     if parts[0] != current[0] or parts > current:
         raise ConfigError(f"Unsupported schema_version: {version!r}; supported {SCHEMA_VERSION}")
     values["schema_version"] = SCHEMA_VERSION
-    if "context" in values:
-        if "generation" in values:
-            raise ConfigError("Do not mix context and generation in the same config layer")
-        values["generation"] = values.pop("context")
+    # Translate prior path names per layer before validating and merging sources.
+    sources = values.get("sources")
+    if isinstance(sources, (dict, list)):
+        items = sources.values() if isinstance(sources, dict) else sources
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if "path" in item:
+                if "workbooks_dir" in item:
+                    raise ConfigError("Do not mix path and workbooks_dir in one source")
+                item["workbooks_dir"] = item.pop("path")
+            notes = item.get("notes")
+            if isinstance(notes, dict) and "root" in notes:
+                if "dir" in notes:
+                    raise ConfigError("Do not mix notes.root and notes.dir in one source")
+                notes["dir"] = notes.pop("root")
     if "generation" in values:
         if not isinstance(values["generation"], dict):
             raise ConfigError("generation must be a mapping")
-        values["generation"] = _context_settings(values["generation"])
+        values["generation"] = _generation_settings(values["generation"])
     return values
 
 
@@ -330,9 +318,9 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         sources.append(
             SourceConfig(
                 id=source_id,
-                path=_path_value(item.get("path"), f"{where}.path"),
+                path=_path_value(item.get("workbooks_dir"), f"{where}.workbooks_dir"),
                 include=tuple(include),
-                note_root=_path_value(notes.get("root"), f"{where}.notes.root"),
+                note_root=_path_value(notes.get("dir"), f"{where}.notes.dir"),
                 recursive=recursive,
                 ignore=tuple(ignore),
                 profile=profile,
@@ -343,7 +331,7 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
     context_raw = data.get("generation", {})
     if not isinstance(context_raw, dict):
         raise ConfigError("generation must be a mapping")
-    context_raw = _context_settings(context_raw)
+    context_raw = _generation_settings(context_raw)
     defaults = asdict(ContextConfig())
     _reject_unknown(context_raw, set(defaults), "generation")
     context_values = {**defaults, **context_raw}
@@ -356,6 +344,8 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
                 raise ConfigError(f"generation.{name} must be a positive integer")
         elif not isinstance(value, str) or not value.strip():
             raise ConfigError(f"generation.{name} must be a non-empty string")
+    if context_values["prompt_profile"] not in {"auto", "default-ja", "default-en"}:
+        raise ConfigError("generation.prompt_profile must be auto, default-ja, or default-en")
     if context_values["overlap_points"] * 2 >= min(
         context_values["tile_width_points"], context_values["tile_height_points"]
     ):
@@ -387,12 +377,12 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
         "schema_version": config.schema_version,
         "sources": {
             source.id: {
-                "path": str(source.path),
+                "workbooks_dir": str(source.path),
                 "recursive": source.recursive,
                 "include": list(source.include),
                 "ignore": list(source.ignore),
                 "notes": {
-                    "root": str(source.note_root),
+                    "dir": str(source.note_root),
                     "profile": source.profile,
                     "frontmatter_term_format": source.frontmatter_term_format,
                     "rename_adapter": source.rename_adapter,

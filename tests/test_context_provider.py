@@ -215,3 +215,30 @@ def test_unknown_usage_does_not_become_zero():
     values = provider.usage_fields(Usage())
     assert values["inputTokens"] is None and values["knownInputTokens"] is None
     assert values["usageComplete"] is False
+
+
+def test_workbook_profile_uses_text_only_bridge_input(setup_provider, monkeypatch):
+    image, journal = setup_provider
+
+    def run(command, prompt, *args, **kwargs):
+        assert "--image" not in command
+        assert "in English" in prompt
+        assert "Relationships between sheets" in prompt
+        Path(command[command.index("--output-last-message") + 1]).write_text(
+            '{"markdown":"### Overview"}'
+        )
+        return '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":3}}'
+
+    monkeypatch.setattr(cli, "run_process", run)
+    result = provider.generate_markdown(
+        ContextConfig(prompt_profile="default-en"),
+        {"sheet": "Workbook overview", "notes": []},
+        [],
+        journal,
+        LOGGER,
+        stage="workbook",
+    )
+    assert result == "### Overview"
+    record = json.loads(journal.read_text())
+    assert record["promptProfile"] == "default-en"
+    assert len(record["promptSha256"]) == 64
