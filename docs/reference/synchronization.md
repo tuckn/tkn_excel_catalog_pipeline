@@ -154,7 +154,7 @@ tkn-excel-note adopt --source workbooks
 | `config show` | 設定ファイルの見出しとインデント付き JSON | 保存しません。出力全体は単独の JSON ではありません。 |
 | `config init` / `workbook list-sheets` | 1 行の結果 JSON | 前者は設定を作成し、後者は読み取り専用です。 |
 
-`pull --ai` の結果 JSON にはその実行の `usage` を含めます。対象別の生成・再利用結果は実行レポートの `details.json` に記録します。
+`pull --context` の結果 JSON にはその実行の `usage` を含めます。対象別の生成・再利用結果は実行レポートの `details.json` に記録します。
 
 `-v` / `--verbose` は Excel・ノート・基準値・予定方向の詳細を表示します。
 `--quiet` は情報ログを抑制し、`--no-color` または環境変数 `NO_COLOR` は色を無効にします。
@@ -214,7 +214,7 @@ tkn-excel-note adopt --source workbooks
 
 全体オプション `--report-dir` でレポートの親フォルダを変更できます。
 同期の `--dry-run` ではこの指定は無効で、レポートを作りません。
-`pull --ai` の結果も同じ実行レポートに含めます。AI の保護・再利用・使用量記録は `state/context/` に別途保存します。
+`pull --context` の結果も同じ実行レポートに含めます。AI の保護・再利用・使用量記録は `state/context/` に別途保存します。
 
 継続利用するデータは、次のように扱います。
 

@@ -4,7 +4,7 @@ Excel ブックを、生成 AI が参照しやすい Markdown ノートにしま
 1 ブックにつき 1 ノートを作り、Excel の更新を取り込み、ノートの Frontmatter で編集したメタデータを Excel に反映できます。
 複数ブックを扱う場合は、同じ処理をフォルダ単位で実行できます。
 
-`pull --ai` はシートの画像・文字・配置から説明を生成し、ブック全体の概要とシート間の関係も同じノートにまとめます。
+`pull --context` はシートの画像・文字・配置から説明を生成し、ブック全体の概要とシート間の関係も同じノートにまとめます。
 AI を使わない `pull` は、メタデータ、シート一覧、抽出テキストを更新します。
 Excel が原本で、Markdown は参照・検索・編集可能なメタデータのための代理ノートです。
 
@@ -19,7 +19,7 @@ tkn-excel-note --help
 ```
 
 入力は `.xlsx` / `.xlsm` です。通常の `pull` / `push` に Excel の起動や AI 接続は不要です。
-`pull --ai` には Windows、デスクトップ版 Microsoft Excel、GenAI Bridge の画像対応接続先が必要です。
+`pull --context` には Windows、デスクトップ版 Microsoft Excel、GenAI Bridge の画像対応接続先が必要です。
 [AI 接続の準備](docs/guides/sheet-content.md#準備と実行)を参照してください。
 
 ## 1つの Excel を Markdown にする
@@ -27,7 +27,7 @@ tkn-excel-note --help
 Excel を保存してから実行します。フォルダの `source` 登録は不要です。
 
 ```shell
-tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --ai
+tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --context
 ```
 
 次の内容を、Frontmatter 付きの 1 ノートに保存します。
@@ -54,7 +54,7 @@ tkn-excel-note pull "C:\path\to\book.xlsx"
 ノート、画像、同期記録、バックアップ、レポートを保存せず、Excel の画像化や AI 呼び出しも行いません。
 
 ```shell
-tkn-excel-note pull "C:\path\to\book.xlsx" --ai --dry-run
+tkn-excel-note pull "C:\path\to\book.xlsx" --context --dry-run
 ```
 
 ## Excel の更新をノートへ取り込む
@@ -62,20 +62,20 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --ai --dry-run
 Excel を保存した後、同じコマンドを実行します。
 
 ```shell
-tkn-excel-note pull "C:\path\to\book.xlsx" --ai
+tkn-excel-note pull "C:\path\to\book.xlsx" --context
 ```
 
 内容・生成条件が変わっていないシートの説明と画像は再利用します。
 ブック全体の説明も、材料となるシート説明や生成条件が同じなら再利用します。
 初回の AI 呼び出しは選択シート数 + 1 回、全結果を再利用できる場合は 0 回です。
 
-`--ai` なしで更新すると、AI の説明は保持します。
+`--context` なしで更新すると、AI の説明は保持します。
 Excel の内容が説明生成時から変わっていれば Frontmatter の `contextStatus` を `stale` にして、再生成が必要だと示します。
 `current` は保存済み Excel と生成記録が対応している状態で、人が正確さを確認したという意味ではありません。
 
 未知の Frontmatter 項目と、管理マーカー外の手書き本文は保持します。
-生成部分を手直ししている場合、`--ai` は上書きを止めます。
-意図して生成し直す場合だけ `--ai --force` を使います。[範囲・保護・状態の詳細](docs/guides/sheet-content.md)を参照してください。
+生成部分を手直ししている場合、`--context` は上書きを止めます。
+意図して生成し直す場合だけ `--context --force` を使います。[範囲・保護・状態の詳細](docs/guides/sheet-content.md)を参照してください。
 
 ## Frontmatter の変更を Excel に反映する
 
@@ -127,14 +127,14 @@ sources:
 ### 一括で更新・反映する
 
 ```shell
-tkn-excel-note pull --source workbooks --ai --dry-run
-tkn-excel-note pull --source workbooks --ai
+tkn-excel-note pull --source workbooks --context --dry-run
+tkn-excel-note pull --source workbooks --context
 tkn-excel-note push --source workbooks --dry-run
 tkn-excel-note push --source workbooks
 tkn-excel-note status --source workbooks
 ```
 
-AI が不要な更新では `--ai` を省略します。
+AI が不要な更新では `--context` を省略します。
 ファイル引数と `--source` をともに省略すると、設定済みの全 source が対象です。
 `push --note "book.xlsx.md"` で一括管理の中から対象ノートを絞れます。
 コマンドは呼び出したときに一度処理し、常駐監視はしません。
@@ -144,7 +144,7 @@ AI が不要な更新では `--ai` を省略します。
 
 | 目的 | コマンド |
 | --- | --- |
-| 1 ブックまたはフォルダ内の代理ノートを作成・更新 | `pull [workbook] [--ai]` |
+| 1 ブックまたはフォルダ内の代理ノートを作成・更新 | `pull [workbook] [--context]` |
 | 1 ノートまたはフォルダ内のメタデータを Excel に反映 | `push [note]` |
 | フォルダの追跡状況を確認 | `status` |
 | 保存済みブックのシート一覧 | `workbook list-sheets --workbook book.xlsx` |
@@ -152,7 +152,7 @@ AI が不要な更新では `--ai` を省略します。
 | 固定 ID を Excel に付与 | `adopt` |
 | 元ブックのない代理ノートをバックアップして削除 | `delete-notes` |
 
-`pull --sheet "Sheet1" --ai` で解析範囲を選べます。省略時は表示中の全シートです。
+`pull --sheet "Sheet1" --context` で解析範囲を選べます。省略時は表示中の全シートです。
 オプションの詳細は `tkn-excel-note pull --help` で確認できます。
 
 進捗・差分・人向けの集計は標準エラー出力、同期コマンドの結果は標準出力の 1 行 JSON です。
@@ -168,7 +168,7 @@ tkn-excel-note --version
 ```
 
 製品・配布名を `tkn-excel-note`、リポジトリ名を `tkn_excel_note` に変更しました。
-旧 `export` と `context build` の機能は `pull --ai` に統合しました。旧コマンドの別名は提供しません。
+旧 `export` と `context build` の機能は `pull --context` に統合しました。旧コマンドの別名は提供しません。
 新 CLI の動作確認後、旧ツール環境があれば削除できます。
 
 ```shell
@@ -177,7 +177,7 @@ uv tool uninstall tkn-excel-catalog-pipeline
 
 保存領域は `~/.tkn/excel_note/` に統一しています。旧 `~/.tkn/excel_catalog_pipeline/` を使っていた場合は、CLI を停止し、移行先が存在しないことを確認してフォルダ全体を `excel_note` へ名前変更してください。設定・同期記録・生成履歴・バックアップをまとめて引き継ぎます。両方のフォルダがある場合は自動で統合せず、内容を確認してください。
 ノートの識別子、管理マーカー、Excel の固定 ID も維持するため、既存ノートを作り直す必要はありません。
-既存のシート説明は再利用でき、初回の `pull --ai` でブック全体の説明を追加します。
+既存のシート説明は再利用でき、初回の `pull --context` でブック全体の説明を追加します。
 旧 `export` の同期情報を持たない Markdown は、独立した書き出しとして残ります。新ノートは別の保存先で作成してください。
 
 ## 詳しい情報と開発

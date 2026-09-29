@@ -1,7 +1,7 @@
 # AI によるブック・シート説明の生成
 
 基本の使い方は [README](../../README.md) を参照してください。
-`pull --ai` は、代理ノートの作成・メタデータ更新に加えてシートの画像解析とブック全体の説明を生成します。
+`pull --context` は、代理ノートの作成・メタデータ更新に加えてシートの画像解析とブック全体の説明を生成します。
 単体入力と設定済み source の一括処理は、同じノート形式・生成・再利用・保護処理を使います。
 
 ## 準備と実行
@@ -33,8 +33,8 @@ generation:
 
 ```shell
 tkn-excel-note workbook list-sheets --workbook "C:\path\to\book.xlsx"
-tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --ai --dry-run
-tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --ai
+tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --context --dry-run
+tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --context
 ```
 
 初回のノート作成もこのコマンドが行うため、先に別のコマンドでノートを作る必要はありません。
@@ -46,12 +46,12 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --
 `--sheet` は完全一致のシート名で繰り返し指定でき、非表示シートも名前を明示した場合に解析します。
 
 ```shell
-tkn-excel-note pull "C:\path\to\book.xlsx" --ai --sheet "Sheet1" --sheet "Sheet2" --profile default-ja
+tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --sheet "Sheet2" --profile default-ja
 ```
 
 対象外のシートはブック全体の説明に使いません。対象と省略したシートの一覧を、本文と Frontmatter に残します。
 一部のシートだけを選んだ場合、以前の対象外シートの説明は保持し、ノートの状態は `partial` になります。
-設定した source の全ブックを処理する場合は `pull --source workbooks --ai` とします。
+設定した source の全ブックを処理する場合は `pull --source workbooks --context` とします。
 一括処理の `--sheet` は各ブックに同じ名前の選択を適用するため、名前が存在しないブックはエラーになります。
 
 ## 生成・再利用・失敗時の扱い
@@ -117,8 +117,8 @@ AI には領域を Z 字順に読み、矢印・色・配置を解釈するよ�
 ブック全体の説明は `context-workbook`、各シートの説明は `context-<sheetId>` 管理セクションに保存します。
 Frontmatter のユーザー項目、管理マーカー外の文章は保持します。
 シート説明だけでなくブック全体の説明も、手直しや対応する記録の欠落を検出すると保護します。
-Excel から削除されたシートの生成セクションは、`--ai` で記録と一致を確認して取り除きます。手直しされていれば停止し、根拠画像は残します。
-再生成して置き換える場合だけ `pull --ai --force` を使います。関係のない既存 Markdown の上書きには使えません。
+Excel から削除されたシートの生成セクションは、`--context` で記録と一致を確認して取り除きます。手直しされていれば停止し、根拠画像は残します。
+再生成して置き換える場合だけ `pull --context --force` を使います。関係のない既存 Markdown の上書きには使えません。
 生成中に Excel やノートの変更を検出した場合は、`--force` でも停止します。
 
 画像と抽出根拠は、ノートと同階層の `img/` に保存します。
@@ -171,7 +171,7 @@ AI 呼び出しは自動再試行しません。使用量の記録や未使用�
 ### 生成プロンプトのプロファイル
 
 `--profile` は文章の作り方・出力言語を選びます。AI 接続先を選ぶ `generation.bridge_profile` とは別です。
-`pull --ai --profile default-ja` / `default-en` で指定します。
+`pull --context --profile default-ja` / `default-en` で指定します。
 
 ```yaml
 generation:
@@ -193,5 +193,5 @@ src/excel_catalog_pipeline/context_profiles/
     workbook-prompt.md
 ```
 
-プロンプトの変更はハッシュで追跡し、`pull --ai` の再利用判定にも反映します。
+プロンプトの変更はハッシュで追跡し、`pull --context` の再利用判定にも反映します。
 同梱ファイルを編集した後は `uv tool install . --reinstall` でインストール済み CLI に反映してください。

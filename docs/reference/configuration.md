@@ -67,4 +67,4 @@ Windows パスを YAML のシングルクォートで囲むと、バックスラ
 
 ## AI 生成の設定
 
-`pull --ai` は `generation` セクションを使います。AI の接続先、認証、モデルは GenAI Bridge の共有設定で管理します。[生成時の設定と保存内容](../guides/sheet-content.md#準備と実行)を参照してください。
+`pull --context` は `generation` セクションを使います。AI の接続先、認証、モデルは GenAI Bridge の共有設定で管理します。[生成時の設定と保存内容](../guides/sheet-content.md#準備と実行)を参照してください。

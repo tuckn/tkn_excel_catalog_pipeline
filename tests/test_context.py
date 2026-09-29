@@ -426,7 +426,7 @@ def test_context_cli_dry_run_has_single_json_output_and_no_artifacts(
             "--config",
             str(config_path),
             "pull",
-            "--ai",
+            "--context",
             "--source",
             "example",
             "--sheet",

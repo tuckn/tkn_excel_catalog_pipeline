@@ -91,27 +91,27 @@ def test_single_create_update_push_preserves_identity_and_user_text(setup):
 
 def test_ai_creates_overview_and_frontmatter_reuses_cache_then_marks_stale(setup):
     _, book, output, calls = setup
-    assert pull(book, output, "--ai") == 0
+    assert pull(book, output, "--context") == 0
     note = read_note(output)
     assert note.frontmatter["contextStatus"] == "current"
     assert note.frontmatter["contextAnalyzedSheets"] == ["Data"]
     assert "Workbook meaning." in note.body and "Sheet meaning." in note.body
     assert note.body.index("context-workbook") < note.body.index("context-1")
     assert [stage for stage, _ in calls] == ["sheet", "workbook"]
-    assert pull(book, None, "--ai") == 0
+    assert pull(book, None, "--context") == 0
     assert len(calls) == 2
     change_cell(book)
     assert pull(book) == 0
     assert read_note(output).frontmatter["contextStatus"] == "stale"
     assert "Workbook meaning." in read_note(output).body and len(calls) == 2
-    assert pull(book, None, "--ai") == 0
+    assert pull(book, None, "--context") == 0
     assert len(calls) == 4 and read_note(output).frontmatter["contextStatus"] == "current"
 
 
 def test_first_ai_dry_run_does_not_create_note_assets_or_state(setup, capsys):
     _, book, output, calls = setup
     before = book.read_bytes()
-    assert pull(book, output, "--ai", "--dry-run") == 0
+    assert pull(book, output, "--context", "--dry-run") == 0
     result = json.loads(capsys.readouterr().out)
     assert result["usage"]["calls"] == 0
     assert not output.parent.exists() and not paths.app_root().exists() and not calls
@@ -121,16 +121,16 @@ def test_first_ai_dry_run_does_not_create_note_assets_or_state(setup, capsys):
 @pytest.mark.parametrize("phrase", ["Sheet meaning.", "Workbook meaning."])
 def test_edited_ai_sections_are_protected_before_writes(setup, phrase):
     _, book, output, calls = setup
-    assert pull(book, output, "--ai") == 0
+    assert pull(book, output, "--context") == 0
     output.write_text(
         output.read_text(encoding="utf-8").replace(phrase, "Reviewed text.")
         + "\nPersonal annotation.\n",
         encoding="utf-8",
     )
     before = output.read_bytes()
-    assert pull(book, None, "--ai") == 1
+    assert pull(book, None, "--context") == 1
     assert output.read_bytes() == before and len(calls) == 2
-    assert pull(book, None, "--ai", "--force") == 0
+    assert pull(book, None, "--context", "--force") == 0
     assert "Personal annotation." in output.read_text(encoding="utf-8")
 
 
@@ -167,20 +167,20 @@ def test_existing_unrelated_markdown_is_not_overwritten_even_with_force(setup):
     _, book, output, calls = setup
     output.parent.mkdir()
     output.write_text("My unrelated document.", encoding="utf-8")
-    assert pull(book, output, "--ai", "--force") == 3
+    assert pull(book, output, "--context", "--force") == 3
     assert output.read_text() == "My unrelated document." and not calls
     assert not paths.state_path().exists()
 
 
 def test_unknown_sheet_fails_before_first_note_is_written(setup):
     _, book, output, calls = setup
-    assert pull(book, output, "--ai", "--sheet", "Missing") == 1
+    assert pull(book, output, "--context", "--sheet", "Missing") == 1
     assert not output.exists() and not paths.state_path().exists() and not calls
 
 
 def test_ai_failure_keeps_previous_overview_and_marks_stale(setup, monkeypatch):
     _, book, output, _ = setup
-    assert pull(book, output, "--ai") == 0
+    assert pull(book, output, "--context") == 0
     change_cell(book)
     original_generate = context.generate_markdown
 
@@ -190,7 +190,7 @@ def test_ai_failure_keeps_previous_overview_and_marks_stale(setup, monkeypatch):
         return original_generate(*args, **kwargs)
 
     monkeypatch.setattr(context, "generate_markdown", fail)
-    assert pull(book, None, "--ai") == 1
+    assert pull(book, None, "--context") == 1
     note = read_note(output)
     assert note.frontmatter["contextStatus"] == "stale"
     assert "Workbook meaning." in note.body
@@ -201,7 +201,7 @@ def test_batch_ai_uses_same_note_format(setup, monkeypatch):
     create_workbook(book.parent / "second.xlsx")
     source = SourceConfig("library", book.parent, ("*.xlsx",), output.parent)
     monkeypatch.setattr(cli, "load_config", lambda **kwargs: replace(config, sources=(source,)))
-    assert cli.main(["pull", "--source", "library", "--ai"]) == 0
+    assert cli.main(["pull", "--source", "library", "--context"]) == 0
     notes = list(output.parent.glob("*.md"))
     assert len(notes) == 2 and len(calls) == 4
     assert all(read_note(note).frontmatter["contextStatus"] == "current" for note in notes)
@@ -262,30 +262,30 @@ def add_second_sheet(book, *, hidden=False):
 def test_only_changed_sheet_is_regenerated_and_overview_is_refreshed(setup):
     _, book, output, calls = setup
     add_second_sheet(book)
-    assert pull(book, output, "--ai") == 0
+    assert pull(book, output, "--context") == 0
     original = context.existing_block(output.read_text(encoding="utf-8"), "2")
     assert len(calls) == 3
     change_cell(book)
-    assert pull(book, None, "--ai") == 0
+    assert pull(book, None, "--context") == 0
     assert [(stage, evidence["sheet"]) for stage, evidence in calls[3:]] == [
         ("sheet", "Data"),
         ("workbook", "Workbook overview"),
     ]
     assert context.existing_block(output.read_text(encoding="utf-8"), "2") == original
     before = output.read_bytes()
-    assert pull(book, None, "--ai") == 0
+    assert pull(book, None, "--context") == 0
     assert output.read_bytes() == before and len(calls) == 5
 
 
 def test_hidden_sheet_is_omitted_until_explicitly_selected(setup):
     _, book, output, calls = setup
     add_second_sheet(book, hidden=True)
-    assert pull(book, output, "--ai") == 0
+    assert pull(book, output, "--context") == 0
     note = read_note(output)
     assert note.frontmatter["contextStatus"] == "partial"
     assert note.frontmatter["contextOmittedSheets"] == ["Second"]
     assert len(calls) == 2
-    assert pull(book, None, "--ai", "--sheet", "Data", "--sheet", "Second") == 0
+    assert pull(book, None, "--context", "--sheet", "Data", "--sheet", "Second") == 0
     note = read_note(output)
     assert note.frontmatter["contextStatus"] == "current"
     assert note.frontmatter["contextAnalyzedSheets"] == ["Data", "Second"]
@@ -296,7 +296,7 @@ def test_hidden_sheet_is_omitted_until_explicitly_selected(setup):
 def test_removed_sheet_context_is_retired_but_manual_edits_are_protected(setup, edited):
     _, book, output, _ = setup
     add_second_sheet(book)
-    assert pull(book, output, "--ai") == 0
+    assert pull(book, output, "--context") == 0
     if edited:
         text = output.read_text(encoding="utf-8")
         block = context.existing_block(text, "2")
@@ -306,10 +306,10 @@ def test_removed_sheet_context_is_retired_but_manual_edits_are_protected(setup, 
         )
     create_workbook(book)
     before = output.read_bytes()
-    assert pull(book, None, "--ai") == (1 if edited else 0)
+    assert pull(book, None, "--context") == (1 if edited else 0)
     if edited:
         assert output.read_bytes() == before
-        assert pull(book, None, "--ai", "--force") == 0
+        assert pull(book, None, "--context", "--force") == 0
     note = read_note(output)
     assert "context-2" not in note.body
     assert note.frontmatter["contextStatus"] == "current"

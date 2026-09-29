@@ -408,7 +408,7 @@ def build_context(
         sum(record.get("durationSeconds", 0) for record in records), 3
     )
     return {
-        "command": "pull --ai",
+        "command": "pull --context",
         "status": "error" if error else "success",
         "dryRun": dry_run,
         "results": results,

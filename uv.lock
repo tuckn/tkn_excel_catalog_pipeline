@@ -2375,7 +2375,7 @@ wheels = [
 
 [[package]]
 name = "tkn-excel-note"
-version = "1.0.1"
+version = "1.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "pillow", marker = "sys_platform == 'win32'" },

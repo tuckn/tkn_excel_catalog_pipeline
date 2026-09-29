@@ -98,7 +98,7 @@ def test_mutating_command_help_explains_normal_write_and_dry_run(capsys) -> None
     assert "Preview and validate planned changes without writing" in captured.out
     assert "workbooks, notes, state, cache, reports" in captured.out
     assert "or external" in captured.out
-    assert "Pull uses AI only when --ai is explicitly selected" in " ".join(captured.out.split())
+    assert "Pull uses AI only when --context is explicitly selected" in " ".join(captured.out.split())
     assert "--write-notes" in captured.out
     assert "Deprecated compatibility option" in captured.out
 

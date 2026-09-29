@@ -106,7 +106,7 @@ def _add_execution_mode(parser: argparse.ArgumentParser, *, legacy_write_option:
         help=(
             "Preview and validate planned changes without writing workbooks, notes, "
             "state, cache, reports, or external systems. Dry-run never renders Excel or calls AI. "
-            "Pull uses AI only when --ai is explicitly selected."
+            "Pull uses AI only when --context is explicitly selected."
         ),
     )
     group.add_argument(
@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pull.add_argument("--output", type=Path, help="Proxy Markdown path for a single workbook.")
     pull.add_argument(
-        "--ai",
+        "--context",
         action="store_true",
         help="Analyze sheet images and generate workbook context using AI.",
     )
@@ -190,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     pull.add_argument(
         "--force",
         action="store_true",
-        help="With --ai, regenerate and intentionally replace edited generated sections.",
+        help="With --context, regenerate and intentionally replace edited generated sections.",
     )
     _add_common(pull)
     _add_execution_mode(pull, legacy_write_option="--write-notes")
@@ -585,8 +585,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise ConfigError("Use either a workbook path or --source")
             if args.output is not None and args.workbook is None:
                 raise ConfigError("--output requires a single workbook path")
-            if not args.ai and (args.sheet or args.profile or args.force):
-                raise ConfigError("--sheet, --profile and --force require --ai")
+            if not args.context and (args.sheet or args.profile or args.force):
+                raise ConfigError("--sheet, --profile and --force require --context")
             if args.profile:
                 config = replace(
                     config, context=replace(config.context, prompt_profile=args.profile)
@@ -646,7 +646,7 @@ def main(argv: list[str] | None = None) -> int:
             write_enabled = False
         elif args.command == "pull":
             write_enabled = not args.dry_run
-            if args.ai:
+            if args.context:
                 actions = run_ai_pull(
                     config,
                     sources,
@@ -699,7 +699,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             raise AssertionError(args.command)
         extra: dict[str, Any] = {"backupPath": str(backup_dir) if backup_dir else ""}
-        if args.command == "pull" and args.ai:
+        if args.command == "pull" and args.context:
             extra["usage"] = usage_totals(actions)
         if args.command in {"pull", "push", "adopt", "delete-notes"} and args.dry_run:
             summary = summarize_actions(
