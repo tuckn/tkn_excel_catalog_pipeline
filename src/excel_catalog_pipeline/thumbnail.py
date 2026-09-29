@@ -8,7 +8,7 @@ import posixpath
 import struct
 import uuid
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -138,6 +138,14 @@ class CoverPlan:
     png: bytes = b""
     asset_changed: bool = False
     warning: str = ""
+    generation: dict[str, Any] | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+    planned: bool = False
+
+    def record(self, entry: dict[str, Any]) -> None:
+        entry["managedCover"] = self.managed
+        if self.generation is not None:
+            entry["coverGeneration"] = self.generation
 
     def write(self) -> None:
         """Commit the attachment before the note; never delete old attachments."""
@@ -172,15 +180,7 @@ def plan_cover(
         if data is None:
             return CoverPlan()
         png = thumbnail_png(data)
-        digest = hashlib.sha256(png).hexdigest()
-        target = source.note_root / "img" / f"excel-cover-{digest}.png"
-        vault = find_obsidian_vault_root(source.note_root)
-        relative = target.resolve().relative_to(vault).as_posix()
-        if any(char in relative for char in "[]|#^\r\n"):
-            raise ThumbnailError("Attachment path contains unsupported Obsidian link characters")
-        link = f"[[{relative}]]"
-        changed = not target.is_file() or target.read_bytes() != png
-        return CoverPlan(link, link, target, png, changed)
+        return attachment_plan(png, source)
     except (
         OSError,
         ValueError,
@@ -191,3 +191,15 @@ def plan_cover(
     ) as exc:
         # Do not expose image contents or decoder diagnostics in reports.
         return CoverPlan(current, managed, warning=f"Thumbnail unavailable ({type(exc).__name__})")
+
+
+def attachment_plan(png: bytes, source: SourceConfig) -> CoverPlan:
+    digest = hashlib.sha256(png).hexdigest()
+    target = source.note_root / "img" / f"excel-cover-{digest}.png"
+    vault = find_obsidian_vault_root(source.note_root)
+    relative = target.resolve().relative_to(vault).as_posix()
+    if any(char in relative for char in "[]|#^\r\n"):
+        raise ThumbnailError("Attachment path contains unsupported Obsidian link characters")
+    link = f"[[{relative}]]"
+    changed = not target.is_file() or target.read_bytes() != png
+    return CoverPlan(link, link, target, png, changed)

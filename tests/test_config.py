@@ -367,14 +367,14 @@ def test_bridge_context_settings_are_strict(settings):
         config_module.validate_config({**config_module.DEFAULT_CONFIG, "generation": settings})
 
 
-@pytest.mark.parametrize("version", [1, "1.1.0"])
+@pytest.mark.parametrize("version", [1, "1.1.0", "1.2.0"])
 def test_schema_version_normalizes_to_semver(version):
     config = config_module.validate_config({**config_module.DEFAULT_CONFIG, "schema_version": version})
-    assert config.schema_version == "1.1.0"
-    assert config_as_dict(config)["schema_version"] == "1.1.0"
+    assert config.schema_version == "1.2.0"
+    assert config_as_dict(config)["schema_version"] == "1.2.0"
 
 
-@pytest.mark.parametrize("version", [True, 1.0, None, "1", "01.0.0", "1.0", "1.0.0-rc.1", "1.0.0+build", "0.9.0", "2.0.0", "1.2.0", "1.1.1"])
+@pytest.mark.parametrize("version", [True, 1.0, None, "1", "01.0.0", "1.0", "1.0.0-rc.1", "1.0.0+build", "0.9.0", "2.0.0", "1.3.0", "1.2.1"])
 def test_invalid_or_unsupported_schema_version(version):
     with pytest.raises(ConfigError, match="schema_version"):
         config_module.validate_config({**config_module.DEFAULT_CONFIG, "schema_version": version})
@@ -410,7 +410,7 @@ def test_template_uses_current_schema_and_generation():
     import yaml
 
     data = yaml.safe_load(config_template_text())
-    assert data["schema_version"] == "1.1.0"
+    assert data["schema_version"] == "1.2.0"
     assert "generation" in data and "context" not in data
     config_module.validate_config(data)
 

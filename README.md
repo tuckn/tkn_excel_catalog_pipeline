@@ -18,7 +18,8 @@ uv tool install .
 tkn-excel-note --help
 ```
 
-入力は `.xlsx` / `.xlsm` です。通常の `pull` / `push` に Excel の起動や AI 接続は不要です。
+入力は `.xlsx` / `.xlsm` です。メタデータ同期と埋め込みサムネイルの抽出には、Excel の起動や AI 接続は不要です。
+シートから cover を生成・更新する場合は Windows とデスクトップ版 Microsoft Excel が必要です。
 `pull --context` には Windows、デスクトップ版 Microsoft Excel、GenAI Bridge の画像対応接続先が必要です。
 [AI 接続の準備](docs/guides/sheet-content.md#準備と実行)を参照してください。
 
@@ -58,10 +59,30 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --context --dry-run
 ```
 
 
+## シート画像を cover にする
+
+埋め込みサムネイルがない、または表示範囲が狭い場合は、保存済みシートの指定範囲から cover を作れます。AI 接続は不要です。
+
+```shell
+tkn-excel-note pull "C:\path\to\book.xlsx" --cover sheet
+tkn-excel-note pull "C:\path\to\book.xlsx" --cover sheet --cover-sheet "概要" --cover-range "A1:Q50" --cover-width 2400
+```
+
+初回の既定値は先頭の表示ワークシート、`A1:Q50`、幅 2400 px の PNG です。範囲を1枚に収め、用紙の余白を取り除きます。
+`--context` とも併用できます。cover 自体は AI に送信しません。
+成功した生成方式・範囲・画像幅をブックごとに記録するため、次回の `pull` はオプションを省略しても同じ条件を使います。
+変更がなく画像も正常なら Excel を起動せず再利用し、ブックや条件が変わったとき、画像が欠損・破損したときに再生成します。
+
+設定ファイルのトップレベルに `cover: {mode: sheet}` を追加すると、選択したブックに常時適用できます。
+事前確認は `--cover sheet --dry-run`、埋め込み方式への切り替えは `--cover embedded` です。
+手動設定した cover は保持し、画像化に失敗した場合も既存の cover を残してメタデータ同期を続けます。
+[詳しい仕様と注意点](docs/guides/catalog-operations.md#シートの指定範囲から-cover-を作る)を参照してください。
+
 ## シート構造を確認する
 
 通常の `pull` は、保存済みの Excel からシート別の事実を取得し、
-既存の `Workbook Map` を表に更新します。Excel 起動・画像化・AI 呼び出しは不要です。
+既存の `Workbook Map` を表に更新します。この構造取得には Excel 起動・画像化・AI 呼び出しは不要です。
+シート cover の更新が必要な場合は、その画像生成のために Excel を起動します。
 `--dry-run` は読み取りだけで、ノートや同期状態を保存しません。
 既存のシート説明（`context-*`）や管理領域外の本文は保持します。
 
@@ -235,6 +256,14 @@ uv run pytest
 uv run ruff check .
 uv run mypy src
 uv build
+```
+
+シート cover の実機回帰テストは、Windows とデスクトップ版 Excel がある環境で明示的に実行します。架空データのブックだけを作成し、非表示の専用 Excel インスタンスを使います。
+
+```powershell
+$env:TKN_EXCEL_NOTE_NATIVE_TESTS = '1'
+uv run pytest tests/test_sheet_cover_native.py
+Remove-Item Env:TKN_EXCEL_NOTE_NATIVE_TESTS
 ```
 
 内部 Python パッケージ名は既存の `excel_catalog_pipeline` を維持しています。

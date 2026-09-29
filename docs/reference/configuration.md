@@ -22,7 +22,7 @@ CLI は次の順に設定を読み、後の値を優先します。
 
 | 設定 | 動作 |
 | --- | --- |
-| `schema_version` | 同梱例の値は `"1.1.0"` です。 |
+| `schema_version` | 同梱例の値は `"1.2.0"` です。 |
 | `sources.<id>` | 入力ブックと代理ノートの保存先をまとめる名前です。`--source <id>` で選びます。 |
 | `sources.<id>.workbooks_dir` | 入力ブックのルートフォルダです。 |
 | `sources.<id>.recursive` | 既定は `false`。`true` にするとサブフォルダも調べます。 |
@@ -64,6 +64,29 @@ Windows パスを YAML のシングルクォートで囲むと、バックスラ
 同梱テンプレートには `sync.pull_preserves_user_metadata`、`sync.delete_missing_notes`、`sync.delete_missing_workbooks`、`sync.allow_source_rename` が含まれています。これらは現行コードで設定値として読み取られますが、同期処理の分岐には使われません。値を変更してもノートの手書き項目の保持、ファイルの自動削除、名前変更の許可は切り替わりません。
 通常の同期は Excel ブックや代理ノートを自動削除せず、未知の Frontmatter 項目と管理マーカー外の本文を保持します。元ブックのない代理ノートを削除するときだけ、[明示的な `delete-notes`](../guides/catalog-operations.md#元ブックがない代理ノートを削除する)を使います。
 名前変更の許可は `sources.<id>.notes.rename_adapter` と `push --allow-rename` で指定します。
+
+## cover の設定
+
+トップレベルの `cover` は、単体・source・全 source の `pull` に共通で適用します。
+シート画像方式を既定にする最小設定は次のとおりです。
+
+```yaml
+cover:
+  mode: sheet
+```
+
+| キー | 組み込み値 | 意味 |
+| --- | --- | --- |
+| `cover.mode` | `auto` | `auto` は最後に成功した方式を継承。記録がなければ `embedded`。`sheet` でシート画像、`embedded` で埋め込み画像を指定します。 |
+| `cover.sheet` | `null` | 保存済みのシート選択を継承。新規は先頭の表示ワークシート。文字列でシート名を指定します。 |
+| `cover.range` | `null` | 保存済みの範囲を継承。新規は `A1:Q50`。 |
+| `cover.width` | `null` | 保存済みの幅を継承。新規は 2400 px。600～4000 の整数。 |
+
+値の決定順は CLI の明示指定 → 設定ファイルの非 null 値 → ブックごとの最後の成功記録 → 初回既定値です。
+`mode` は `auto` のときに記録を継承します。設定ファイルの `mode: embedded` を明示すると既存の自動生成 cover も埋め込み方式へ切り替えます。手動 cover は保護します。
+`null` は初回値へのリセットではありません。全条件を初回値に戻すには、一度 `--cover embedded` を成功させてから `--cover sheet` を実行し、設定ファイルの個別指定も外してください。
+`range` や `width` を設定ファイルに指定すると、過去に CLI でブックごとに選んだ条件より優先されます。個別指定を維持したい場合は `mode: sheet` だけにします。
+シート方式は Windows とデスクトップ版 Excel が必要です。`generation` の AI 設定は不要です。[利用方法と画像の仕様](../guides/catalog-operations.md#シートの指定範囲から-cover-を作る)を参照してください。
 
 ## AI 生成の設定
 

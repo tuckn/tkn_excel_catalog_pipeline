@@ -15,15 +15,24 @@ import yaml
 from pydantic import TypeAdapter, ValidationError
 from tkn_genai_bridge import Profile
 
-from .models import AppConfig, ContextConfig, FrontmatterTermFormat, SourceConfig, SyncConfig
+from .cover_settings import validate_cover
+from .models import (
+    AppConfig,
+    ContextConfig,
+    CoverConfig,
+    FrontmatterTermFormat,
+    SourceConfig,
+    SyncConfig,
+)
 from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
     "sources": {},
     "generation": asdict(ContextConfig()),
+    "cover": asdict(CoverConfig()),
     "sync": {
         "pull_preserves_user_metadata": True,
         "delete_missing_notes": False,
@@ -32,7 +41,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_extracted_text_chars": 12000,
     },
 }
-TOP_LEVEL_KEYS = {"schema_version", "sources", "sync", "generation"}
+TOP_LEVEL_KEYS = {"schema_version", "sources", "sync", "generation", "cover"}
 SYNC_KEYS = set(DEFAULT_CONFIG["sync"])
 SOURCE_KEYS = {"id", "workbooks_dir", "recursive", "include", "ignore", "notes"}
 NOTES_KEYS = {"dir", "profile", "frontmatter_term_format", "rename_adapter"}
@@ -259,6 +268,10 @@ def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> App
 
 def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()) -> AppConfig:
     data = _normalize_layer(data)
+    try:
+        cover = validate_cover(data.get("cover", {}))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
     sync_raw = data.get("sync")
     if not isinstance(sync_raw, dict):
@@ -360,6 +373,7 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         sync=sync,
         loaded_files=loaded_files,
         context=ContextConfig(**context_values),
+        cover=cover,
     )
 
 
@@ -398,5 +412,6 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
             "max_extracted_text_chars": config.sync.max_extracted_text_chars,
         },
         "generation": asdict(config.context),
+        "cover": asdict(config.cover),
         "loadedConfigFiles": [str(path) for path in config.loaded_files],
     }

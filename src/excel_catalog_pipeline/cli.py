@@ -8,7 +8,7 @@ import logging
 import os
 import sys
 from collections import Counter
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ from .ai_pull import run_ai_pull, usage_totals
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
 from .context import run_context
 from .context_source import ContextError
+from .cover_settings import validate_cover
 from .deletion import run_delete_notes
 from .models import Action, SourceConfig
 from .pipeline import run_adopt, run_pull, run_push, run_status
@@ -179,6 +180,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="One Excel file; otherwise select --source ID or --all-sources.",
     )
     pull.add_argument("--output", type=Path, help="Proxy Markdown path for a single workbook.")
+    pull.add_argument(
+        "--cover",
+        choices=("auto", "embedded", "sheet"),
+        help="Cover source; auto remembers the last successful mode (new: embedded).",
+    )
+    pull.add_argument(
+        "--cover-sheet", help="Cover worksheet name; default: first visible worksheet."
+    )
+    pull.add_argument(
+        "--cover-range", help="Cover rectangle; default: A1:Q50. Requires sheet mode."
+    )
+    pull.add_argument(
+        "--cover-width", type=int, help="Cover PNG width, 600-4000 pixels; default: 2400."
+    )
     pull.add_argument(
         "--context",
         action="store_true",
@@ -366,6 +381,15 @@ def _log_push_action(logger: logging.Logger, action: Action) -> None:
 def _log_pull_action(logger: logging.Logger, action: Action) -> None:
     for warning in action.details.get("warnings", []):
         logger.warning("[%s] %s", action.status, _one_line(str(warning)))
+    cover = action.details.get("cover", {})
+    if cover.get("mode") == "sheet":
+        logger.info(
+            "Cover %s: sheet=%s range=%s width=%s.",
+            cover.get("status"),
+            cover.get("sheet", ""),
+            cover.get("range", ""),
+            cover.get("width", ""),
+        )
     if action.status == "unchanged":
         return
     if action.status in {"created", "updated", "deleted"}:
@@ -599,6 +623,26 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "pull":
+            cover_values = asdict(config.cover)
+            for key, value in {
+                "mode": args.cover,
+                "sheet": args.cover_sheet,
+                "range": args.cover_range,
+                "width": args.cover_width,
+            }.items():
+                if value is not None:
+                    cover_values[key] = value
+            try:
+                config = replace(config, cover=validate_cover(cover_values))
+            except ValueError as exc:
+                raise ConfigError(str(exc)) from exc
+            if config.cover.mode == "embedded" and any(
+                value is not None
+                for value in (args.cover_sheet, args.cover_range, args.cover_width)
+            ):
+                raise ConfigError(
+                    "--cover-sheet, --cover-range and --cover-width require sheet mode"
+                )
             if not args.context and (args.sheet or args.profile or args.force):
                 raise ConfigError("--sheet, --profile and --force require --context")
             if args.profile:

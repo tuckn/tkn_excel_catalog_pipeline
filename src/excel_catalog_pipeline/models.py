@@ -84,12 +84,22 @@ class ContextConfig:
 
 
 @dataclass(frozen=True)
+class CoverConfig:
+    # auto inherits the last successful generation mode; new covers use embedded.
+    mode: str = "auto"
+    sheet: str | None = None
+    range: str | None = None
+    width: int | None = None
+
+
+@dataclass(frozen=True)
 class AppConfig:
     schema_version: str
     sources: tuple[SourceConfig, ...]
     sync: SyncConfig
     loaded_files: tuple[Path, ...] = ()
     context: ContextConfig = field(default_factory=ContextConfig)
+    cover: CoverConfig = field(default_factory=CoverConfig)
 
 
 @dataclass

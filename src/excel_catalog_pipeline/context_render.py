@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import importlib
 import math
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .context_source import ContextError
+from .excel_render import worksheet_snapshot
 from .models import ContextConfig
 
 
@@ -140,13 +140,7 @@ def _overflow_bounds(ws: Any, area: Any, text: str, box: Box) -> Box:
 def render_sheet(
     snapshot: Path, evidence: dict[str, Any], output: Path, config: ContextConfig
 ) -> list[dict[str, Any]]:
-    if os.name != "nt":
-        raise ContextError(
-            "Visual context rendering requires Windows and installed desktop Microsoft Excel"
-        )
     try:
-        pythoncom = importlib.import_module("pythoncom")
-        client = importlib.import_module("win32com.client")
         pdfium = importlib.import_module("pypdfium2")
         pil_image = importlib.import_module("PIL.Image")
     except ImportError as exc:
@@ -154,29 +148,7 @@ def render_sheet(
             "Rendering dependencies are missing; reinstall with uv tool install . --reinstall"
         ) from exc
     output.mkdir(parents=True, exist_ok=True)
-    app = workbook = None
-    pythoncom.CoInitialize()
-    try:
-        app = client.DispatchEx("Excel.Application")
-        app.Visible = False
-        app.DisplayAlerts = False
-        app.EnableEvents = False
-        app.AskToUpdateLinks = False
-        app.AutomationSecurity = 3
-        workbook = app.Workbooks.Open(
-            str(snapshot),
-            UpdateLinks=0,
-            ReadOnly=True,
-            IgnoreReadOnlyRecommended=True,
-            AddToMru=False,
-            Password="",
-            WriteResPassword="",
-            Notify=False,
-        )
-        # Set after opening: Excel rejects Calculation assignments with no workbook.
-        app.Calculation = -4135
-        ws = workbook.Worksheets(evidence["sheet"])
-        ws.Visible = -1
+    with worksheet_snapshot(snapshot, evidence["sheet"]) as ws:
         boxes = []
         for cell in evidence["cells"]:
             area = ws.Range(cell["cell"])
@@ -286,13 +258,3 @@ def render_sheet(
                 }
             )
         return result
-    finally:
-        try:
-            if workbook is not None:
-                workbook.Close(SaveChanges=False)
-        finally:
-            try:
-                if app is not None:
-                    app.Quit()
-            finally:
-                pythoncom.CoUninitialize()

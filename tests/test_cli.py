@@ -129,7 +129,7 @@ def test_config_show_prints_path_before_indented_json(monkeypatch, tmp_path: Pat
     assert payload["command"] == "config show"
     assert payload["config"]["loadedConfigFiles"] == [str(config.resolve())]
     assert payload["config"]["sources"] == {}
-    assert '\n  "config": {\n    "schema_version": "1.1.0",' in body
+    assert '\n  "config": {\n    "schema_version": "1.2.0",' in body
     assert captured.err == ""
 
 

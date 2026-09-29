@@ -34,6 +34,7 @@ from .adapters.ooxml import (
     inspect_workbook,
     write_properties,
 )
+from .cover import plan_cover
 from .discovery import is_source_path_in_scope
 from .models import (
     CORE_PROPERTY_BY_METADATA_FIELD,
@@ -52,7 +53,6 @@ from .sync import (
     direction_fields,
     resolve_for_pull,
 )
-from .thumbnail import plan_cover
 
 
 def _now() -> str:
@@ -175,6 +175,8 @@ def _update_existing_entry(
         previous_paths=previous_paths,
     )
     updated["managedCover"] = entry.get("managedCover", "")
+    if "coverGeneration" in entry:
+        updated["coverGeneration"] = entry["coverGeneration"]
     updated["lastPull"] = now if result == "pulled" else str(entry.get("lastPull", ""))
     updated["lastPush"] = now if result == "pushed" else str(entry.get("lastPush", ""))
     return updated
@@ -284,8 +286,6 @@ def run_pull(
                 continue
             note = _find_note(workbook, entry, index)
             source_values = workbook.metadata()
-            cover = plan_cover(workbook, source, note, entry)
-            cover_details = {"warnings": [cover.warning] if cover.warning else []}
             if note is None and entry and Path(str(entry.get("notePath", ""))).is_file():
                 actions.append(
                     Action(
@@ -299,6 +299,19 @@ def run_pull(
                 )
                 continue
             if note is None:
+                cover = plan_cover(
+                    workbook,
+                    source,
+                    note,
+                    entry,
+                    options=config.cover,
+                    render=write_notes,
+                    max_workbook_mb=config.context.max_workbook_mb,
+                )
+                cover_details = {
+                    "warnings": [cover.warning] if cover.warning else [],
+                    "cover": cover.details,
+                }
                 target = note_path(workbook, source)
                 if target.exists() or target.resolve() in used_note_paths:
                     suffix = hashlib.sha256(workbook.relative_path.encode()).hexdigest()[:8]
@@ -317,7 +330,7 @@ def run_pull(
                         now=now,
                         result="pulled",
                     )
-                    entry_value["managedCover"] = cover.managed
+                    cover.record(entry_value)
                     replace_entry(state, old_key=old_key, workbook=workbook, entry=entry_value)
                     seen_state_keys.add(state_key(workbook))
                     state_changed = True
@@ -329,7 +342,10 @@ def run_pull(
                         source_path=workbook.relative_path,
                         note_path=str(target),
                         workbook_id=workbook.workbook_id,
-                        changed_fields=[*source_values, *(["cover"] if cover.value else [])],
+                        changed_fields=[
+                            *source_values,
+                            *(["cover"] if cover.value or cover.planned else []),
+                        ],
                         details=cover_details,
                         message=(
                             "Tracked proxy note is missing; no source was deleted."
@@ -384,22 +400,6 @@ def run_pull(
                 )
                 continue
             resolved = resolve_for_pull(decisions, preference=preference)
-            preview = render_note(
-                workbook,
-                source,
-                metadata=resolved,
-                existing=note,
-                touch_updated=False,
-                cover=cover.value,
-            )
-            current_text = note.path.read_text(encoding="utf-8-sig")
-            pull_fields = direction_fields(decisions, "pull")
-            if preference == "source":
-                pull_fields = [
-                    decision.field for decision in decisions if decision.source != decision.note
-                ]
-            if cover.value != note.frontmatter.get("cover", "") or cover.asset_changed:
-                pull_fields.append("cover")
             desired_path = note_path(workbook, source)
             if entry and (
                 entry.get("currentPath") == workbook.relative_path
@@ -433,7 +433,42 @@ def run_pull(
                         )
                     )
                     continue
-            changed = preview != current_text or rename_needed or cover.asset_changed
+            cover = plan_cover(
+                workbook,
+                source,
+                note,
+                entry,
+                options=config.cover,
+                render=write_notes,
+                max_workbook_mb=config.context.max_workbook_mb,
+            )
+            cover_details = {
+                "warnings": [cover.warning] if cover.warning else [],
+                "cover": cover.details,
+            }
+            preview = render_note(
+                workbook,
+                source,
+                metadata=resolved,
+                existing=note,
+                touch_updated=False,
+                cover=cover.value,
+            )
+            current_text = note.path.read_text(encoding="utf-8-sig")
+            pull_fields = direction_fields(decisions, "pull")
+            if preference == "source":
+                pull_fields = [
+                    decision.field for decision in decisions if decision.source != decision.note
+                ]
+            if (
+                cover.value != note.frontmatter.get("cover", "")
+                or cover.asset_changed
+                or cover.planned
+            ):
+                pull_fields.append("cover")
+            changed = (
+                preview != current_text or rename_needed or cover.asset_changed or cover.planned
+            )
             status = "unchanged"
             if direction_fields(decisions, "push") and not pull_fields and not changed:
                 status = "push-required"
@@ -459,17 +494,24 @@ def run_pull(
                         )
                     else:
                         entry_value = make_entry(workbook, note, advanced, now=now, result="pulled")
-                    entry_value["managedCover"] = cover.managed
+                    cover.record(entry_value)
                     replace_entry(state, old_key=old_key, workbook=workbook, entry=entry_value)
                     seen_state_keys.add(state_key(workbook))
                     state_changed = True
                     status = "updated"
             elif write_notes and entry is None:
                 entry_value = make_entry(workbook, note, source_values, now=now, result="baseline")
-                entry_value["managedCover"] = cover.managed
+                cover.record(entry_value)
                 replace_entry(state, old_key=old_key, workbook=workbook, entry=entry_value)
                 seen_state_keys.add(state_key(workbook))
                 state_changed = True
+            if write_notes and entry is not None and cover.generation is not None:
+                recorded = state["entries"].get(state_key(workbook), entry)
+                if recorded.get("coverGeneration") != cover.generation:
+                    recorded = dict(recorded)
+                    cover.record(recorded)
+                    replace_entry(state, old_key=old_key, workbook=workbook, entry=recorded)
+                    state_changed = True
             source_to_note_fields = _dedupe_fields(pull_fields)
             note_to_source_fields = (
                 [] if preference == "source" else direction_fields(decisions, "push")

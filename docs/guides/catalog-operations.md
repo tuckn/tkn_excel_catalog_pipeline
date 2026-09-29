@@ -4,7 +4,7 @@
 
 ## Obsidian Bases のカードにサムネイルを表示する
 
-`pull` は Excel に保存されたブックのサムネイルをローカルで PNG に変換し、
+初回の既定方式（`embedded`）では、`pull` は Excel に保存されたブックのサムネイルをローカルで PNG に変換し、
 `notes.dir/img/excel-cover-<画像ハッシュ>.png` として保存します。
 Frontmatter の `cover` には Vault 内の画像へのリンクを設定します。以下の `catalog` は、Vault 内で代理ノートを保存するフォルダ名の例です。
 `.xlsx` / `.xlsm` のパッケージサムネイルが対象で、シート上の挿入画像は選びません。
@@ -33,19 +33,67 @@ cover: "[[catalog/img/excel-cover-<画像ハッシュ>.png]]"
 対象と変更予定を確認してから反映します。
 
 ```shell
-tkn-excel-note pull --dry-run
-tkn-excel-note pull
+tkn-excel-note pull --source workbooks --dry-run
+tkn-excel-note pull --source workbooks
 ```
 
-- `--dry-run` は画像変換まで検証しますが、画像・ノート・同期状態を保存しません。
-- サムネイルがないブックは `cover` が空になります。画像のないカードも表示されます。
+- 埋め込み方式の `--dry-run` は画像変換まで検証しますが、画像・ノート・同期状態を保存しません。
+- 埋め込み方式でサムネイルがないブックは `cover` が空になります。画像のないカードも表示されます。
 - 手動で設定した `cover` は保持します。自動抽出へ戻す場合は `cover` を空にしてください。
 - 自動設定した画像は次回の `pull` で更新し、欠損・破損した出力画像も再生成します。
 - 変換できないサムネイルは警告を出し、既存の `cover` と通常のメタデータ同期を保持します。
 - 同期状態の `managedCover` で自動設定したリンクを識別します。状態を失った場合、既存の非空の `cover` は手動指定として保持します。
-- 元の Excel と過去に出力した画像は削除しません。画像は最大辺 1200 px の PNG です。
+- 元の Excel と過去に出力した画像は削除しません。埋め込み方式の画像は最大辺 1200 px の PNG です。
 
 カードの画像プロパティはローカル添付へのリンクを受け付けます（[Obsidian 公式ヘルプ](https://help.obsidian.md/bases/views/cards)）。
+
+## シートの指定範囲から cover を作る
+
+`--cover sheet` は Windows のデスクトップ版 Excel で保存済みのシートを描画し、指定範囲を1枚の PNG にします。埋め込みサムネイルの有無に左右されません。AI 呼び出しや外部への画像送信はありません。
+
+```shell
+tkn-excel-note pull "C:\path\to\book.xlsx" --cover sheet --dry-run
+tkn-excel-note pull "C:\path\to\book.xlsx" --cover sheet
+tkn-excel-note pull "C:\path\to\book.xlsx" --cover sheet --cover-sheet "概要" --cover-range "B2:R51" --cover-width 3000
+tkn-excel-note pull --source workbooks --cover sheet
+```
+
+| オプション | 初回の既定値・意味 |
+| --- | --- |
+| `--cover sheet` | シート画像方式へ切り替えます。 |
+| `--cover embedded` | 埋め込みサムネイル方式へ切り替えます。 |
+| `--cover auto` | 既定。最後に成功した方式を継承し、記録がない場合は `embedded` を使います。 |
+| `--cover-sheet` | 先頭の表示ワークシート。名前を指定する場合も表示シートが対象です。非表示シート・チャートシートは対象外です。 |
+| `--cover-range` | `A1:Q50`。単一の矩形 A1 範囲。シート名付き参照・複数範囲・行列全体は指定できません。 |
+| `--cover-width` | 幅 2400 px。600～4000 の整数。高さは範囲の描画結果に合わせます。 |
+
+`--cover-sheet` / `--cover-range` / `--cover-width` はシート方式で使います。既にシート cover を生成したブックなら `--cover sheet` の再指定は不要です。
+`--sheet` は AI 解析対象の指定で、cover のシート選択には使いません。`--context` と併用できます。
+
+生成に成功すると、同期状態の `coverGeneration` に方式・シート選択・範囲・幅・描画処理の版・保存済みブックと画像のハッシュを記録します。
+通常の `pull` でオプションを省略しても、埋め込み方式へ戻りません。条件とブックが同じで出力画像も正常なら、Excel を起動せず再利用します。
+セル以外の保存内容変更もブックの変更として扱うため、メタデータ変更や `push` の後にも再描画する場合があります。
+生成結果の画像が以前と同じでも、変更した範囲などの条件は記録します。
+
+手動の cover は `--cover sheet` でも上書きしません。自動管理に戻す場合は Frontmatter の `cover` を空にします。
+状態が失われた場合も非空の cover は保護します。失敗時は警告を出し、以前の cover と成功時の生成記録を保持して、通常のメタデータ同期を続けます。
+存在しないシート、Excel 未導入、描画失敗などが対象です。古い画像を自動削除することはありません。
+
+`--dry-run` は保存済みブックから対象シートと範囲の指定、再生成の要否を確認します。Excel の起動、一時ブック・PDF・PNG の作成、ノート・同期状態・レポートの保存は行いません。
+実際の描画可否や正確な高さは実行時に確定します。結果の `details.cover` と stderr に対象・条件・`planned` / `cached` / `rendered` / `warning` を表示します。
+
+画像化は一時コピーで行い、元の Excel ファイルと開いている作業用 Excel は変更しません。未保存の編集は含めません。
+マクロ・イベント・リンク更新・再計算・起動時の外部データ更新を抑止する仕組みは、シート説明の画像化と共通です。
+保存済みの印刷範囲・タイトル行列・ヘッダー・フッターを使わず、指定範囲を PDF に描画して PNG 化します。
+Excel の印刷倍率と PDF 出力については [PageSetup.Zoom](https://learn.microsoft.com/en-us/office/vba/api/excel.pagesetup.zoom) と [Worksheet.ExportAsFixedFormat](https://learn.microsoft.com/en-us/office/vba/api/excel.worksheet.exportasfixedformat) の仕様に従います。
+
+指定範囲内の空白セルは維持し、用紙の余白だけを取り除きます。印刷でのセル寸法を正確に取得するため、一時コピーに測定枠を加え、PDF からその枠を除去してから画像化します。
+グリッド線と行列見出しは表示せず、罫線は表示します。非表示行列や図形の印刷設定などは Excel の印刷結果に従うため、画面をそのまま撮影した画像とは異なります。
+結合セル・図形などが指定範囲の境界をまたぐ場合は、必要に応じて範囲を広げてください。
+
+出力は最大1600万画素、描画範囲の幅・高さはそれぞれ12000ポイントまでです。複数ページに分かれた結果を一部だけ採用することはありません。
+超過時は範囲や画像幅を小さくしてください。入力ブックのサイズ上限には `generation.max_workbook_mb`（既定100 MiB）を使います。
+小さなカードでは全体を見分ける用途、画像を開いたときには細部を読む用途に向きます。
 
 ## 元ブックがない代理ノートを削除する
 

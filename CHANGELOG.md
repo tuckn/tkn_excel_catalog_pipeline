@@ -8,6 +8,13 @@ Git 履歴で独立したバージョン更新を確認できない版は掲載�
 
 ## [Unreleased]
 
+### 1.3.0
+
+- `pull --cover sheet` で、保存済みシートの指定範囲から高解像度 PNG の cover を生成。初回既定は先頭の表示ワークシート、A1:Q50、幅 2400 px。AI 接続は不要。
+- `--cover-sheet` / `--cover-range` / `--cover-width` と `cover` 設定を追加。生成条件を同期記録に残し、通常 pull で再利用・更新。`--cover embedded` で従来方式へ切り替え可能。
+- 手動 cover と画像化失敗時の既存 cover を保護。dry-run は Excel を起動せず、予定だけを確認。
+- 設定スキーマを 1.2.0 に更新。旧1系の設定は読み取り時に正規化し、設定ファイルは自動変更しない。
+
 ### 1.2.0
 
 - pull の全 source 処理には --all-sources を必須化。対象未指定は設定を読み込まずヘルプだけを表示。単体ファイル・--source・--all-sources の併用はエラー。
