@@ -103,6 +103,7 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
         "date",
         "updated",
         "noteId",
+        "contextStatus",
     ]
     assert "Handwritten text." in updated.body
     assert "Excel Metadata" not in updated.body
@@ -144,6 +145,7 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
         "date",
         "updated",
         "noteId",
+        "contextStatus",
     )
     assert note.frontmatter["schemaVersion"] == template.schema_version
     assert tuple(note.frontmatter) == template.frontmatter_fields

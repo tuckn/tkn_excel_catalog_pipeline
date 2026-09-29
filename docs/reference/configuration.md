@@ -7,13 +7,16 @@
 CLI は次の順に設定を読み、後の値を優先します。
 
 1. 組み込みの既定値。
-2. ユーザー共通の `~/.tkn/excel_catalog_pipeline/config.yaml`。
+2. ユーザー共通の `~/.tkn/excel_note/config.yaml`。
 3. 実行時の作業フォルダにある `.tkn/config.yaml`。
 4. `--config` で指定したファイル。
 
 `generation` などの設定項目は重ねられます。`sources` と `include` / `ignore` のような一覧は、上位ファイルで指定するとその項目全体を置き換えます。同じ source の設定を複数ファイルに分けて部分的に追加することはできません。
 相対パスは設定ファイルの場所ではなく、コマンドを実行した作業フォルダから解決します。
-`tkn-excel-catalog config show` で読み込まれたファイルと有効な値を確認できます。
+`tkn-excel-note config show` で読み込まれたファイルと有効な値を確認できます。
+
+保存領域は `~/.tkn/excel_note/` です。旧領域を使っていた場合は、[移行手順](../../README.md#旧版から更新する)に沿ってフォルダ全体を名前変更します。実際の設定ファイルは `config show` で確認できます。
+単体ファイルの `pull <workbook>` / `push <note>` に `sources` 登録は不要です。設定済み source に属する場合はその設定を使い、未登録の単体入力では用語を `plain` で出力します。
 
 ## 探索範囲
 
@@ -38,7 +41,7 @@ CLI は次の順に設定を読み、後の値を優先します。
 
 ```yaml
 sources:
-  catalog:
+  workbooks:
     workbooks_dir: 'C:\path\to\excel-workbooks'
     recursive: true
     include:
@@ -48,7 +51,7 @@ sources:
       - "archive/**"
       - "**/Temp/**"
     notes:
-      dir: 'C:\path\to\catalog-notes'
+      dir: 'C:\path\to\excel-notes'
       profile: tkn-obsidian-v1
       frontmatter_term_format: obsidian-link
       rename_adapter: report-only
@@ -64,4 +67,4 @@ Windows パスを YAML のシングルクォートで囲むと、バックスラ
 
 ## AI 生成の設定
 
-`context build` と `export` は `generation` セクションを使います。AI の接続先、認証、モデルは GenAI Bridge の共有設定で管理します。[生成時の設定と保存内容](../guides/sheet-content.md#準備と実行)を参照してください。
+`pull --ai` は `generation` セクションを使います。AI の接続先、認証、モデルは GenAI Bridge の共有設定で管理します。[生成時の設定と保存内容](../guides/sheet-content.md#準備と実行)を参照してください。

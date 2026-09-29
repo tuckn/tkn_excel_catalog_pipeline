@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
-APPLICATION_ID = "excel_catalog_pipeline"
+APPLICATION_ID = "excel_note"
 
 
 def app_root() -> Path:

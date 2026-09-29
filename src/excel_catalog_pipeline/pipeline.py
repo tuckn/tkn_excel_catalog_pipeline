@@ -199,7 +199,7 @@ def run_status(config: AppConfig, sources: tuple[SourceConfig, ...]) -> list[Act
             status = "tracked" if entry else "untracked-source"
             if workbook.read_status != "ok":
                 status = workbook.read_status
-            if workbook.workbook_id in duplicates:
+            if workbook.workbook_id in duplicates or match == "duplicate-id":
                 status = "duplicate-id"
             actions.append(
                 Action(
@@ -268,7 +268,9 @@ def run_pull(
                     )
                 )
                 continue
-            if workbook.workbook_id and workbook.workbook_id in duplicates:
+            if (
+                workbook.workbook_id and workbook.workbook_id in duplicates
+            ) or matched_by == "duplicate-id":
                 actions.append(
                     Action(
                         status="duplicate-id",
@@ -284,6 +286,18 @@ def run_pull(
             source_values = workbook.metadata()
             cover = plan_cover(workbook, source, note, entry)
             cover_details = {"warnings": [cover.warning] if cover.warning else []}
+            if note is None and entry and Path(str(entry.get("notePath", ""))).is_file():
+                actions.append(
+                    Action(
+                        status="conflict",
+                        source_root_id=source.id,
+                        source_path=workbook.relative_path,
+                        note_path=str(entry["notePath"]),
+                        conflict_fields=["notePath"],
+                        message="The linked note is outside the selected notes scope; include it before continuing.",
+                    )
+                )
+                continue
             if note is None:
                 target = note_path(workbook, source)
                 if target.exists() or target.resolve() in used_note_paths:
@@ -387,6 +401,11 @@ def run_pull(
             if cover.value != note.frontmatter.get("cover", "") or cover.asset_changed:
                 pull_fields.append("cover")
             desired_path = note_path(workbook, source)
+            if entry and (
+                entry.get("currentPath") == workbook.relative_path
+                or entry.get("workbookPath") == str(workbook.path.resolve())
+            ):
+                desired_path = note.path
             rename_needed = desired_path.resolve() != note.path.resolve()
             if rename_needed:
                 collision_root = find_obsidian_vault_root(source.note_root)
@@ -581,7 +600,10 @@ def run_push(
                     )
                 )
                 continue
-            if workbook.workbook_id and workbook.workbook_id in duplicates:
+            old_key, entry, matched_by = find_entry(state, workbook)
+            if (
+                workbook.workbook_id and workbook.workbook_id in duplicates
+            ) or matched_by == "duplicate-id":
                 record(
                     Action(
                         status="duplicate-id",
@@ -593,7 +615,6 @@ def run_push(
                     )
                 )
                 continue
-            old_key, entry, matched_by = find_entry(state, workbook)
             source_values = workbook.metadata()
             note_values = note_metadata(note)
             if entry is None:

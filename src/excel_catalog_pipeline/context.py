@@ -1,4 +1,4 @@
-"""Opt-in sheet context builds; never called by the metadata synchronization pipeline."""
+"""Opt-in AI generation for unified proxy notes."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from typing import Any
 from tkn_genai_bridge import Profile
 
 from .adapters.markdown import discover_notes
-from .adapters.ooxml import read_custom_properties
-from .context_profiles import prompt_digest
+from .adapters.ooxml import content_fingerprint, read_custom_properties
+from .context_profiles import load_prompt, profile_name, prompt_digest
 from .context_provider import (
     PROMPT_VERSION,
     atomic_json,
@@ -35,6 +35,7 @@ from .context_render import render_sheet
 from .context_source import ContextError, extract_sheet, rendering_snapshot, sheet_list
 from .discovery import is_source_path_in_scope
 from .models import ContextConfig, SourceConfig
+from .note_layout import patch_frontmatter
 from .paths import state_root
 from .shared_read import read_shared
 
@@ -179,8 +180,15 @@ def build_context(
     *,
     dry_run: bool,
     force: bool,
+    note_path: Path | None = None,
+    preview_text: str | None = None,
+    include_overview: bool = False,
 ) -> dict[str, Any]:
-    note, book_key = find_proxy(source, workbook, data)
+    if note_path is None:
+        note, book_key = find_proxy(source, workbook, data)
+    else:
+        note = note_path
+        book_key = digest(str(workbook.resolve()).encode())[:20]
     results: list[dict[str, Any]] = []
     records: list[dict[str, Any]] = []
     state_dir = state_root() / "context" / digest(str(note.resolve()).encode())[:24]
@@ -203,7 +211,7 @@ def build_context(
         for sheet, evidence in zip(selected, prepared, strict=True):
             result: dict[str, Any] = {"sheet": sheet["name"], "notePath": str(note)}
             results.append(result)
-            original = note.read_bytes()
+            original = note.read_bytes() if note.exists() else (preview_text or "").encode()
             text = original.decode("utf-8-sig")
             old_block = existing_block(text, sheet["id"])
             state_path = state_dir / f"sheet-{sheet['id']}.json"
@@ -318,6 +326,12 @@ def build_context(
                 block_hash = digest(block.encode())
                 block = block.replace("\r\n", "\n").replace("\n", newline)
                 new_text = update_text(text, sheet["id"], block)
+                if include_overview:
+                    new_text = patch_frontmatter(
+                        new_text, {"contextStatus": "stale", "updated": utc_now()}
+                    )
+                if read_shared(workbook) != data:
+                    raise ContextError("Workbook changed during generation; run pull again")
                 encoded = (
                     b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b""
                 ) + new_text.encode("utf-8")
@@ -357,6 +371,22 @@ def build_context(
                 result.update(status="written", imageCount=len(images), usagePath=str(usage_path))
                 logger.info("Sheet %s: context written to %s.", sheet["name"], note)
 
+        if include_overview:
+            _build_overview(
+                note,
+                workbook,
+                data,
+                selected,
+                config,
+                logger,
+                state_dir,
+                results,
+                records,
+                dry_run=dry_run,
+                force=force,
+                preview_text=preview_text,
+            )
+
     try:
         if dry_run:
             run()
@@ -368,7 +398,7 @@ def build_context(
             results[-1].update(status="error", message=str(exc))
         else:
             results.append({"status": "error", "message": str(exc)})
-        logger.error("Context build stopped: %s", exc)
+        logger.error("AI pull stopped: %s", exc)
     error = any(result["status"] == "error" for result in results)
     totals: dict[str, Any] = {"calls": len(records)}
     for field in ("inputTokens", "outputTokens", "cachedInputTokens", "reasoningTokens"):
@@ -378,12 +408,164 @@ def build_context(
         sum(record.get("durationSeconds", 0) for record in records), 3
     )
     return {
-        "command": "context build",
+        "command": "pull --ai",
         "status": "error" if error else "success",
         "dryRun": dry_run,
         "results": results,
         "usage": totals,
     }
+
+
+def _build_overview(
+    note: Path,
+    workbook: Path,
+    data: bytes,
+    selected: list[dict[str, str]],
+    config: ContextConfig,
+    logger: logging.Logger,
+    state_dir: Path,
+    results: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    *,
+    dry_run: bool,
+    force: bool,
+    preview_text: str | None,
+) -> None:
+    original = note.read_bytes() if note.exists() else (preview_text or "").encode()
+    text = original.decode("utf-8-sig")
+    current_ids = {sheet["id"] for sheet in sheet_list(data)}
+    removed_ids = sorted(
+        set(re.findall(r"<!-- excel-catalog:begin context-([^ >]+) -->", text))
+        - current_ids
+        - {"workbook"}
+    )
+    for sheet_id in removed_ids:
+        previous = existing_block(text, sheet_id)
+        saved = _read_state(state_dir / f"sheet-{sheet_id}.json")
+        if (
+            previous
+            and digest(previous.replace("\r\n", "\n").encode()) != saved.get("blockSha256")
+            and not force
+        ):
+            raise ContextError(
+                "Context for a removed sheet was edited or has no matching state; use --force only to replace it intentionally"
+            )
+        text = block_pattern(sheet_id).sub("", text, count=1)
+    old = existing_block(text, "workbook")
+    state_path = state_dir / "workbook.json"
+    state = _read_state(state_path)
+    if old and digest(old.replace("\r\n", "\n").encode()) != state.get("blockSha256") and not force:
+        raise ContextError(
+            "Workbook overview was edited or has no matching state; use --force only to replace it intentionally"
+        )
+    connection = resolve_profile(config)
+    plan = generation_plan(connection)
+    prompt = load_prompt(config, stage="workbook")
+    needs_sheets = any(item["status"] == "planned" for item in results)
+    retained = any(item["status"] == "retained" for item in results)
+    result: dict[str, Any] = {"kind": "workbook", "status": "planned", "notePath": str(note)}
+    result["removedSheetIds"] = removed_ids
+    results.append(result)
+    if dry_run and needs_sheets:
+        return
+    names = [sheet["name"] for sheet in selected]
+    omitted = [sheet["name"] for sheet in sheet_list(data) if sheet["name"] not in names]
+    notes = [
+        {"sheet": sheet["name"], "markdown": existing_block(text, sheet["id"]) or ""}
+        for sheet in selected
+    ]
+    evidence = {"sheet": "Workbook overview", "notes": notes, "omittedSheets": omitted}
+    if len(json.dumps(evidence, ensure_ascii=False)) > config.max_input_chars:
+        raise ContextError(
+            "Workbook overview input exceeds generation.max_input_chars; no text was truncated"
+        )
+    key = digest(
+        json.dumps(
+            {"evidence": evidence, "prompt": prompt, "config": asdict(config), "bridge": plan},
+            sort_keys=True,
+        ).encode()
+    )
+    if not force and old and state.get("buildKey") == key:
+        result["status"] = "cached"
+    elif dry_run:
+        return
+    else:
+        generation_plan(connection, check_executable=True)
+        markdown = generate_markdown(
+            config,
+            evidence,
+            [],
+            state_root() / "context" / "usage" / f"{uuid.uuid4().hex}.json",
+            logger,
+            profile=connection,
+            stage="workbook",
+            on_usage=records.append,
+        ).replace("\r\n", "\n")
+        _validate_markdown(markdown, set())
+        heading = "ブック全体の説明" if profile_name(config) == "default-ja" else "Workbook context"
+        scope = json.dumps(names, ensure_ascii=False)
+        omitted_text = json.dumps(omitted, ensure_ascii=False)
+        block = (
+            f"<!-- excel-catalog:begin context-workbook -->\n## {heading}\n\n"
+            f"Analyzed sheets: {scope}\n\nOmitted sheets: {omitted_text}\n\n{markdown}\n"
+            "<!-- excel-catalog:end context-workbook -->"
+        )
+        newline = "\r\n" if b"\r\n" in original else "\n"
+        block = block.replace("\n", newline)
+        if old:
+            text = update_text(text, "workbook", block)
+        else:
+            first = re.search(r"<!-- excel-catalog:begin context-", text)
+            if first:
+                text = text[: first.start()] + block + newline * 2 + text[first.start() :]
+            else:
+                text = update_text(text, "workbook", block)
+        state = {
+            "buildKey": key,
+            "blockSha256": digest(block.replace("\r\n", "\n").encode()),
+            "generatedAt": utc_now(),
+        }
+        result["status"] = "written"
+    if dry_run:
+        return
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        fingerprint = content_fingerprint(archive)
+    text = patch_frontmatter(
+        text,
+        {
+            "contextStatus": "unverified" if retained else "partial" if omitted else "current",
+            "contextSourceFingerprint": fingerprint,
+            "contextAnalyzedSheets": names,
+            "contextOmittedSheets": omitted,
+            "contextGeneratedAt": state["generatedAt"],
+        },
+    )
+    encoded = (b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b"") + text.encode(
+        "utf-8"
+    )
+    if read_shared(workbook) != data:
+        raise ContextError("Workbook changed during generation; run pull again")
+    if note.read_bytes() != original:
+        raise ContextError(
+            "Proxy note changed during generation; workbook overview was not applied"
+        )
+    if encoded != original:
+        text = patch_frontmatter(text, {"updated": utc_now()})
+        encoded = (b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b"") + text.encode(
+            "utf-8"
+        )
+        if result["status"] == "cached":
+            result["status"] = "refreshed"
+        temporary = note.with_name(f".{note.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_bytes(encoded)
+            if note.read_bytes() != original:
+                raise ContextError("Proxy note changed before publication")
+            temporary.replace(note)
+        finally:
+            temporary.unlink(missing_ok=True)
+    if result["status"] == "written":
+        atomic_json(state_path, state)
 
 
 def run_context(
@@ -397,6 +579,9 @@ def run_context(
     dry_run: bool,
     force: bool,
     logger: logging.Logger,
+    note_path: Path | None = None,
+    preview_text: str | None = None,
+    include_overview: bool = False,
 ) -> dict[str, Any]:
     started = time.monotonic()
     workbook = resolve_workbook(source, workbook_selector, config)
@@ -414,15 +599,23 @@ def run_context(
         if sheet["name"] in names or (all_sheets and sheet["state"] == "visible")
     ]
     if not selected:
-        raise ContextError(
-            "Select at least one worksheet with --sheet, or use --all-sheets for visible worksheets"
-        )
+        raise ContextError("No worksheet selected; use --sheet to include a hidden worksheet")
     result = build_context(
-        source, workbook, data, selected, config, logger, dry_run=dry_run, force=force
+        source,
+        workbook,
+        data,
+        selected,
+        config,
+        logger,
+        dry_run=dry_run,
+        force=force,
+        note_path=note_path,
+        preview_text=preview_text,
+        include_overview=include_overview,
     )
     result["durationSeconds"] = round(time.monotonic() - started, 3)
     logger.info(
-        "Context build: result=%s | duration=%.1fs | AI calls=%d | input=%s tokens | output=%s tokens",
+        "AI pull: result=%s | duration=%.1fs | AI calls=%d | input=%s tokens | output=%s tokens",
         result["status"],
         result["durationSeconds"],
         result["usage"]["calls"],

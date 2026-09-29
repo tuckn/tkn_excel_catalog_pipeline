@@ -19,6 +19,7 @@ sourceModified: {{ source_modified }}
 date: {{ date }}
 updated: {{ updated }}
 noteId: {{ note_id }}
+contextStatus: {{ context_status }}
 ---
 
 # {{ title }}

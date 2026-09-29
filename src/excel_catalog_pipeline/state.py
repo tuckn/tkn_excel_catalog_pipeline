@@ -84,7 +84,21 @@ def find_entry(
     direct = state_key(workbook)
     value = entries.get(direct)
     if isinstance(value, dict):
+        recorded_path = value.get("workbookPath")
+        if workbook.workbook_id and recorded_path:
+            previous = Path(recorded_path).resolve()
+            if previous != workbook.path.resolve() and previous.exists():
+                return direct, value, "duplicate-id"
         return direct, value, "identity"
+    absolute_matches = [
+        (key, item)
+        for key, item in entries.items()
+        if isinstance(item, dict)
+        and item.get("workbookPath")
+        and Path(item["workbookPath"]).resolve() == workbook.path.resolve()
+    ]
+    if len(absolute_matches) == 1:
+        return absolute_matches[0][0], absolute_matches[0][1], "absolute-path"
     path_matches = [
         (key, item)
         for key, item in entries.items()
@@ -95,12 +109,17 @@ def find_entry(
     if len(path_matches) == 1:
         return path_matches[0][0], path_matches[0][1], "path"
     if workbook.content_fingerprint:
+        source_root = workbook.path.parents[len(Path(workbook.relative_path).parts) - 1]
         signature_matches = [
             (key, item)
             for key, item in entries.items()
             if isinstance(item, dict)
             and item.get("sourceRootId") == workbook.source_root_id
             and item.get("contentFingerprint") == workbook.content_fingerprint
+            # Identical existing workbooks are independent files, not renames.
+            and not Path(
+                item.get("workbookPath") or source_root / str(item.get("currentPath", ""))
+            ).exists()
         ]
         if len(signature_matches) == 1:
             return signature_matches[0][0], signature_matches[0][1], "fingerprint"
@@ -120,6 +139,7 @@ def make_entry(
         "sourceRootId": workbook.source_root_id,
         "workbookId": workbook.workbook_id,
         "currentPath": workbook.relative_path,
+        "workbookPath": str(workbook.path.resolve()),
         "previousPaths": previous_paths or [],
         "notePath": str(note.path),
         "noteId": note.note_id,

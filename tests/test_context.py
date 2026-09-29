@@ -401,6 +401,8 @@ def test_context_cli_dry_run_has_single_json_output_and_no_artifacts(
     from excel_catalog_pipeline.cli import main
 
     source, _, _, state, calls, _ = build_setup
+    import excel_catalog_pipeline.pipeline as pipeline
+    monkeypatch.setattr(pipeline, "state_path", lambda: state / "sync-state.json")
     monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "absent.yaml")
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
@@ -423,12 +425,10 @@ def test_context_cli_dry_run_has_single_json_output_and_no_artifacts(
         [
             "--config",
             str(config_path),
-            "context",
-            "build",
+            "pull",
+            "--ai",
             "--source",
             "example",
-            "--workbook",
-            "book.xlsx",
             "--sheet",
             "Data",
             "--dry-run",
@@ -438,20 +438,9 @@ def test_context_cli_dry_run_has_single_json_output_and_no_artifacts(
     assert code == 0
     payload = json.loads(captured.out)
     assert len(captured.out.splitlines()) == 1
-    assert payload["durationSeconds"] >= 0
     assert payload["usage"]["inputTokens"] == 0
     assert "unsaved" in captured.err
     assert calls == [] and not state.exists()
-
-
-def test_context_cli_requires_explicit_sheet_selection() -> None:
-    from excel_catalog_pipeline.cli import build_parser
-
-    with pytest.raises(SystemExit) as failure:
-        build_parser().parse_args(
-            ["context", "build", "--source", "example", "--workbook", "book.xlsx"]
-        )
-    assert failure.value.code == 2
 
 
 def test_shared_model_change_invalidates_context_cache(build_setup, monkeypatch):

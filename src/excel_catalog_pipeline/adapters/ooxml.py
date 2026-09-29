@@ -313,6 +313,8 @@ def inspect_workbook(
 def discover_workbooks(source: SourceConfig, *, max_text_chars: int) -> list[WorkbookInfo]:
     if not source.path.exists():
         raise WorkbookError(f"Source root not found: {source.path}")
+    if source.single_workbook is not None:
+        return [inspect_workbook(source.single_workbook, source, max_text_chars=max_text_chars)]
     paths: dict[str, Path] = {}
     candidates = source.path.rglob("*") if source.recursive else source.path.iterdir()
     for path in candidates:

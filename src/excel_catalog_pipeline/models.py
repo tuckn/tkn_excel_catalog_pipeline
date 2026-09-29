@@ -53,6 +53,8 @@ class SourceConfig:
     profile: str = "tkn-obsidian-v1"
     frontmatter_term_format: FrontmatterTermFormat = "obsidian-link"
     rename_adapter: str = "report-only"
+    single_workbook: Path | None = None
+    single_note: Path | None = None
 
 
 @dataclass(frozen=True)

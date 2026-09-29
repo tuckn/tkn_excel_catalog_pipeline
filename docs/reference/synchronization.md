@@ -22,7 +22,8 @@
 `push` ではノート側の `sourceCreated` / `sourceModified` を Excel へ書かず、ノートの現在値も保持します。
 
 生成する `type`、元ファイルの日時、`date`、`updated`、`noteId` は引用符なしの YAML 値、`schemaVersion` は引用符付き文字列です。
-本文の管理部分は `excel-catalog` マーカーで囲みます。
+AI 説明の鮮度と対象範囲は `contextStatus`、`contextAnalyzedSheets`、`contextOmittedSheets`、`contextGeneratedAt`、`contextSourceFingerprint` に記録します。[状態の意味](../guides/sheet-content.md#説明の状態)を参照してください。これらは Excel へ書き戻しません。
+本文の管理部分は既存ノートとの継続性のため `excel-catalog` マーカーで囲みます。
 未知の Frontmatter 項目と、マーカー外の手書き本文は保持します。
 
 
@@ -86,8 +87,8 @@ Excel を正としてノートをそろえる場合は、次の順で実行し�
 > プレビューで対象と差分を確認してから通常実行してください。
 
 ```shell
-tkn-excel-catalog -v pull --source catalog --prefer-source --dry-run
-tkn-excel-catalog pull --source catalog --prefer-source
+tkn-excel-note -v pull --source workbooks --prefer-source --dry-run
+tkn-excel-note pull --source workbooks --prefer-source
 ```
 
 通常の `pull` はその編集を保持します。
@@ -101,8 +102,8 @@ tkn-excel-catalog pull --source catalog --prefer-source
 通常実行はバックアップ後にブックを書き換えるため、ID の付与が目的の場合に実行します。
 
 ```shell
-tkn-excel-catalog adopt --source catalog --dry-run
-tkn-excel-catalog adopt --source catalog
+tkn-excel-note adopt --source workbooks --dry-run
+tkn-excel-note adopt --source workbooks
 ```
 
 名前変更・移動には、次の 2 方向があります。
@@ -144,15 +145,16 @@ tkn-excel-catalog adopt --source catalog
 `unchanged` は個別表示せず、最後の集計に件数を出します。
 `missing-source` は元ブックが見つからないため `sourcePath` がなく、ノート名だけを表示します。
 
-標準出力の形式はコマンドで異なります。
+同期コマンドは標準出力に 1 行のコンパクトな結果 JSON を返します。
 
-| コマンド                                           | 標準出力                                              | 保存される実行結果                                   |
-| -------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
-| `status`、通常の `pull` / `push` / `adopt` | JSON を出しません。画面用の結果は標準エラー出力です。 | 実行レポート                                         |
-| `pull` / `push` / `adopt` の `--dry-run`   | 同上                                                  | 保存しません。予定・理由・競合を画面で確認します。   |
-| `config show`                                    | 設定ファイルの見出しと、インデント付き JSON           | 保存しません。出力全体は単独の JSON ではありません。 |
-| `config init`、`context` の各コマンド          | 1 件のコンパクトな JSON                               | 設定やシート処理の結果は各節を参照してください。     |
-| `delete-notes` | 1 件のコンパクトな JSON | 通常実行は実行レポートと削除前バックアップ。`--dry-run` は保存しません。 |
+| コマンド | 標準出力 | 保存される実行結果 |
+| --- | --- | --- |
+| `status`、通常の `pull` / `push` / `adopt` / `delete-notes` | 1 行の結果 JSON | 実行レポート。書き込み時のバックアップは各処理の仕様に従います。 |
+| `--dry-run` | 1 行の結果 JSON | 保存しません。予定・理由・競合を画面で確認します。 |
+| `config show` | 設定ファイルの見出しとインデント付き JSON | 保存しません。出力全体は単独の JSON ではありません。 |
+| `config init` / `workbook list-sheets` | 1 行の結果 JSON | 前者は設定を作成し、後者は読み取り専用です。 |
+
+`pull --ai` の結果 JSON にはその実行の `usage` を含めます。対象別の生成・再利用結果は実行レポートの `details.json` に記録します。
 
 `-v` / `--verbose` は Excel・ノート・基準値・予定方向の詳細を表示します。
 `--quiet` は情報ログを抑制し、`--no-color` または環境変数 `NO_COLOR` は色を無効にします。
@@ -177,6 +179,7 @@ tkn-excel-catalog adopt --source catalog
 | `duplicate-id`                      | 複数のブックに同じ固定 ID があります。対応付けを確認します。                           |
 | `rename-required`                   | 名前変更・移動に必要な設定や許可を確認します。                                         |
 | `rename-error`                      | 移動先の名前、衝突、ファイル操作の失敗を確認します。                                   |
+| `generation-error` | AI の事前検証・描画・生成・保存に失敗しました。途中までの更新が残る場合があります。[生成処理](../guides/sheet-content.md)を参照してください。 |
 | `read-error` / `write-error`      | 読み取り／書き込み・事後検証に失敗しました。表示理由とバックアップを確認します。       |
 
 終了コードは、通常 `0` が成功、`1` が実行・検証・部分的な書き込みエラー、`2` が未解決の競合、`3` が設定・対象選択などのエラーです。
@@ -190,7 +193,7 @@ tkn-excel-catalog adopt --source catalog
 `status` と通常の同期コマンドは、次のファイルを作成します。
 
 ```text
-~/.tkn/excel_catalog_pipeline/state/runs/<run-id>/
+~/.tkn/excel_note/state/runs/<run-id>/
   summary.json
   actions.csv
   details.json
@@ -211,7 +214,7 @@ tkn-excel-catalog adopt --source catalog
 
 全体オプション `--report-dir` でレポートの親フォルダを変更できます。
 同期の `--dry-run` ではこの指定は無効で、レポートを作りません。
-`context` にも適用せず、シート処理専用の保存先を使います。
+`pull --ai` の結果も同じ実行レポートに含めます。AI の保護・再利用・使用量記録は `state/context/` に別途保存します。
 
 継続利用するデータは、次のように扱います。
 
@@ -219,13 +222,13 @@ tkn-excel-catalog adopt --source catalog
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `sources.<id>.workbooks_dir`                                | 元の Excel ブックです。代理ノートだけでは元の内容を復元できません。                                                                  |
 | `notes.dir`                                | 代理ノートと、シート説明の画像です。手書き本文や過去に取り込んだ説明を含むため、元ブックと別に保持します。                             |
-| `~/.tkn/excel_catalog_pipeline/config.yaml` | 入出力先などの設定です。入力・保存先の指定を保持します。                                                                   |
+| `~/.tkn/excel_note/config.yaml` | 入出力先などの設定です。入力・保存先の指定を保持します。                                                                   |
 | `state/sync-state.json`                     | ブック・ノートの対応と前回一致値です。失うと、既存の差分を競合として扱うことがあります。手編集や安易な削除を避けてください。         |
 | `state/backups/`                            | Excel 更新前のバックアップです。過去の内容への復旧に使います。                                                                       |
 | `state/runs/`                               | 各実行のレポートです。削除するとその実行の調査記録を失います。                                                                       |
 | `state/context/`                            | シート説明の保護・再利用用の記録、過去の取り込み時のバックアップ、使用量の記録です。欠落時は既存の説明の置き換えを保護することがあります。 |
 
-上表の `state/` は `~/.tkn/excel_catalog_pipeline/state/` です。
+上表の `state/` は `~/.tkn/excel_note/state/` です。旧版からは設定・同期記録・バックアップを含むフォルダ全体を移行します。[移行手順](../../README.md#旧版から更新する)を参照してください。
 環境を移す場合は、元ブック、ノートと画像、設定、同期・シート処理の記録を一緒に保全してください。
 ノートには元ファイルの絶対パスや抽出した本文が入り、レポートにもパスやメタデータが入ります。
 実データを含む生成物を公開リポジトリへ追加しないでください。

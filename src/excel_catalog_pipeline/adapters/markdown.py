@@ -83,7 +83,15 @@ def discover_notes(source: SourceConfig) -> list[ProxyNote]:
     if not root.exists():
         return []
     notes: list[ProxyNote] = []
-    candidates = root.rglob("*.md") if source.recursive else root.glob("*.md")
+    candidates = (
+        [source.single_note]
+        if source.single_note is not None and source.single_note.exists()
+        else []
+        if source.single_note is not None
+        else root.rglob("*.md")
+        if source.recursive
+        else root.glob("*.md")
+    )
     for path in sorted(candidates, key=lambda item: item.as_posix().casefold()):
         note = read_note(path)
         if str(note.frontmatter.get("type", "")).casefold() == "excel" or (
@@ -270,6 +278,8 @@ def note_filename(workbook: WorkbookInfo) -> str:
 
 def note_path(workbook: WorkbookInfo, source: SourceConfig) -> Path:
     """Return the proxy-note path mirroring the workbook's relative parent folder."""
+    if source.single_note is not None:
+        return source.single_note
     parent = Path(workbook.relative_path).parent
     if parent == Path("."):
         return source.note_root / note_filename(workbook)
@@ -364,6 +374,7 @@ def render_note(
                     else existing_frontmatter["updated"]
                 ),
                 "note_id": existing_frontmatter.get("noteId", str(uuid.uuid4())),
+                "context_status": existing_frontmatter.get("contextStatus", "not-generated"),
                 "workbook_path": f"`{workbook.path}`",
                 "workbook_map": _render_map(workbook),
                 "extracted_text": _render_text(workbook),
@@ -374,6 +385,14 @@ def render_note(
         raise NoteError(str(exc)) from exc
 
     frontmatter = _merge_frontmatter(rendered_template.frontmatter, existing_frontmatter)
+    has_context = "<!-- excel-catalog:begin context-" in clean_body
+    recorded_fingerprint = existing_frontmatter.get("contextSourceFingerprint")
+    if not has_context:
+        frontmatter["contextStatus"] = "not-generated"
+    elif not recorded_fingerprint:
+        frontmatter["contextStatus"] = "unverified"
+    elif recorded_fingerprint != workbook.content_fingerprint:
+        frontmatter["contextStatus"] = "stale"
 
     if existing:
         body = _marker_pattern("excel-metadata").sub("", clean_body)
@@ -384,8 +403,9 @@ def render_note(
             count=1,
             flags=re.MULTILINE | re.DOTALL,
         )
-        for section in sections:
-            body = _replace_managed(body, section)
+        if refresh_source_properties:
+            for section in sections:
+                body = _replace_managed(body, section)
     else:
         body = rendered_template.body.rstrip() + "\n"
     yaml_text = yaml.dump(

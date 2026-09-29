@@ -67,6 +67,9 @@ def matches_include(relative_path: str, patterns: tuple[str, ...]) -> bool:
 def is_source_path_in_scope(relative_path: str, source: SourceConfig) -> bool:
     """Return whether a recorded source-relative path belongs to this source scan."""
     value = normalize_relative_path(relative_path)
+    if source.single_workbook is not None:
+        selected = source.single_workbook.relative_to(source.path).as_posix()
+        return value.casefold() == selected.casefold()
     if not value or (not source.recursive and "/" in value):
         return False
     return matches_include(value, source.include) and not matches_any(value, source.ignore)

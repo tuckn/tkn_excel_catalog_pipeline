@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tkn-excel-catalog-pipeline"
-version = "0.9.0"
-description = "Synchronize Excel workbook metadata with Markdown catalog notes."
+name = "tkn-excel-note"
+version = "1.0.1"
+description = "Create and update Excel proxy Markdown notes with optional AI context."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-tkn-excel-catalog = "excel_catalog_pipeline.cli:main"
+tkn-excel-note = "excel_catalog_pipeline.cli:main"
 
 [dependency-groups]
 dev = [

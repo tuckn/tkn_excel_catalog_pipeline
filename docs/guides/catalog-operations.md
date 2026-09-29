@@ -33,8 +33,8 @@ cover: "[[catalog/img/excel-cover-<画像ハッシュ>.png]]"
 対象と変更予定を確認してから反映します。
 
 ```shell
-tkn-excel-catalog pull --dry-run
-tkn-excel-catalog pull
+tkn-excel-note pull --dry-run
+tkn-excel-note pull
 ```
 
 - `--dry-run` は画像変換まで検証しますが、画像・ノート・同期状態を保存しません。
@@ -55,15 +55,15 @@ tkn-excel-catalog pull
 ノート名を指定する場合:
 
 ```shell
-tkn-excel-catalog delete-notes --source catalog --note "example.xlsx.md" --dry-run
-tkn-excel-catalog delete-notes --source catalog --note "example.xlsx.md"
+tkn-excel-note delete-notes --source workbooks --note "example.xlsx.md" --dry-run
+tkn-excel-note delete-notes --source workbooks --note "example.xlsx.md"
 ```
 
 元ブックがないノートをまとめて削除する場合:
 
 ```shell
-tkn-excel-catalog delete-notes --source catalog --all-missing --dry-run
-tkn-excel-catalog delete-notes --source catalog --all-missing
+tkn-excel-note delete-notes --source workbooks --all-missing --dry-run
+tkn-excel-note delete-notes --source workbooks --all-missing
 ```
 
 `--note` はノートの絶対パス、ノートルートからの相対パス、元ブックの相対パス（`sourceFileName`）、`noteId`、`sourceId` でも指定でき、繰り返し指定できます。
@@ -78,7 +78,7 @@ tkn-excel-catalog delete-notes --source catalog --all-missing
 入力ルートの不在、読み取り失敗、辿れないリンク先、同期記録の欠落・曖昧さ、重複ノートなどがあれば、削除開始前にその実行全体を停止します。
 現在のノートと同期記録のノート先が異なる場合、旧パスにも別実体のノートが残っていれば重複として停止します。
 
-削除前に、対象ノートの全文と同期記録を `~/.tkn/excel_catalog_pipeline/state/backups/deleted-notes/<run-id>/` に保存します。
+削除前に、対象ノートの全文と同期記録を `~/.tkn/excel_note/state/backups/deleted-notes/<run-id>/` に保存します。
 手書き本文もバックアップに含みます。Excel ブック、添付画像、シート説明の処理記録は削除しません。
 ノートの削除に成功した後で同期記録の該当項目だけを解除するため、次回の `pull` に削除済みノートの `missing-source` が残りません。
 元ブックが後日復元された場合、次回の `pull` は新しい代理ノートを作成します。

@@ -15,7 +15,7 @@ from .helpers import create_workbook
 
 
 def test_cli_uses_tkn_prefixed_program_name() -> None:
-    assert cli_module.build_parser().prog == "tkn-excel-catalog"
+    assert cli_module.build_parser().prog == "tkn-excel-note"
 
 
 def test_workbook_list_sheets_reads_saved_names_without_creating_notes(
@@ -98,7 +98,7 @@ def test_mutating_command_help_explains_normal_write_and_dry_run(capsys) -> None
     assert "Preview and validate planned changes without writing" in captured.out
     assert "workbooks, notes, state, cache, reports" in captured.out
     assert "or external" in captured.out
-    assert "synchronization command uses no network" in " ".join(captured.out.split())
+    assert "Pull uses AI only when --ai is explicitly selected" in " ".join(captured.out.split())
     assert "--write-notes" in captured.out
     assert "Deprecated compatibility option" in captured.out
 
@@ -165,7 +165,8 @@ sources:
     summary_path = next((tmp_path / "reports").glob("*-pull/summary.json"))
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert result == 0
-    assert captured.out == ""
+    assert len(captured.out.splitlines()) == 1
+    assert isinstance(json.loads(captured.out), dict)
     assert f"[SUCCESS] [created] notePath={notes / 'book.xlsx.md'}" in captured.err
     assert "sourcePath=book.xlsx" in captured.err
     assert "  mode: write" in captured.err
@@ -210,7 +211,8 @@ sources:
     captured = capsys.readouterr()
 
     assert result == 0
-    assert captured.out == ""
+    assert len(captured.out.splitlines()) == 1
+    assert isinstance(json.loads(captured.out), dict)
     assert f"[INFO] [would-create] notePath={notes / 'book.xlsx.md'}" in captured.err
     assert "  mode: dry-run" in captured.err
     assert "  report: -" in captured.err
@@ -271,7 +273,8 @@ sources:
     captured = capsys.readouterr()
 
     assert result == 0
-    assert captured.out == ""
+    assert len(captured.out.splitlines()) == 1
+    assert isinstance(json.loads(captured.out), dict)
     assert "[INFO] Status results:\n  example:" in captured.err
     assert "    tracked workbooks: 1" in captured.err
     assert "    untracked workbooks: 1" in captured.err
@@ -359,8 +362,9 @@ sources:
     captured = capsys.readouterr()
 
     assert result == 2
-    assert captured.out == ""
-    assert "[INFO] Running push for 1 configured source(s): example." in captured.err
+    assert len(captured.out.splitlines()) == 1
+    assert isinstance(json.loads(captured.out), dict)
+    assert "[INFO] Running push for 1 source(s): example." in captured.err
     assert '[INFO] Selected source configuration:\n  "example":' in captured.err
     assert f"    workbooks_dir: '{workbooks.resolve()}'" in captured.err
     assert "    recursive: false" in captured.err
@@ -451,7 +455,8 @@ sources:
     captured = capsys.readouterr()
 
     assert result == 0
-    assert captured.out == ""
+    assert len(captured.out.splitlines()) == 1
+    assert isinstance(json.loads(captured.out), dict)
     assert (
         f"[INFO] [would-update] notePath={tmp_path / 'notes' / 'nested' / 'book.xlsx.md'} | "
         "sourcePath=nested/book.xlsx" in captured.err
