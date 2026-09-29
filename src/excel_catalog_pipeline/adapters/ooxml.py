@@ -23,6 +23,7 @@ from ..discovery import is_source_path_in_scope
 from ..models import SourceConfig, WorkbookInfo
 from ..paths import temporary_root
 from ..shared_read import read_shared
+from .sheet_inventory import read_inventory
 
 OOXML_EXTENSIONS = {".xlsx", ".xlsm"}
 CORE_PATH = "docProps/core.xml"
@@ -288,6 +289,10 @@ def inspect_workbook(
             info.core = read_core_properties(archive)
             info.custom = read_custom_properties(archive)
             info.sheets = read_sheets(archive)
+            info.sheet_inventory = {
+                sheet["sheetId"]: read_inventory(archive, sheet["path"])
+                for sheet in info.sheets
+            }
             info.sheet_text = read_sheet_text(archive, info.sheets, max_text_chars)
             info.content_fingerprint = content_fingerprint(archive)
             if any(name.casefold().startswith("_xmlsignatures/") for name in archive.namelist()):

@@ -93,6 +93,20 @@ class AppConfig:
 
 
 @dataclass
+class SheetInventory:
+    """Saved OOXML facts; None means unknown, an empty range means no populated cells."""
+
+    stored_range: str | None = None
+    content_range: str | None = None
+    populated_cells: int | None = None
+    tables: int | None = None
+    shapes: int | None = None
+    images: int | None = None
+    charts: int | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class WorkbookInfo:
     path: Path
     relative_path: str
@@ -103,6 +117,7 @@ class WorkbookInfo:
     core: dict[str, str] = field(default_factory=dict)
     custom: dict[str, str] = field(default_factory=dict)
     sheets: list[dict[str, str]] = field(default_factory=list)
+    sheet_inventory: dict[str, SheetInventory] = field(default_factory=dict)
     sheet_text: dict[str, list[str]] = field(default_factory=dict)
     content_fingerprint: str = ""
     read_status: str = "ok"

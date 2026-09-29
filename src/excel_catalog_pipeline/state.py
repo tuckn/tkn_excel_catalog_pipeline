@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -145,6 +146,14 @@ def make_entry(
         "noteId": note.note_id,
         "baseMetadata": dict(metadata),
         "contentFingerprint": workbook.content_fingerprint,
+        "sheetInventory": {
+            "schemaVersion": 1,
+            "sheets": [
+                dict(sheet, **asdict(workbook.sheet_inventory[sheet["sheetId"]]))
+                for sheet in workbook.sheets
+                if sheet["sheetId"] in workbook.sheet_inventory
+            ],
+        },
         "sourceSignature": {
             "sizeBytes": workbook.size_bytes,
             "modified": workbook.modified,

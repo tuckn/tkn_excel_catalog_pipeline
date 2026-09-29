@@ -57,6 +57,38 @@ tkn-excel-note pull "C:\path\to\book.xlsx"
 tkn-excel-note pull "C:\path\to\book.xlsx" --context --dry-run
 ```
 
+
+## シート構造を確認する
+
+通常の `pull` は、保存済みの Excel からシート別の事実を取得し、
+既存の `Workbook Map` を表に更新します。Excel 起動・画像化・AI 呼び出しは不要です。
+`--dry-run` は読み取りだけで、ノートや同期状態を保存しません。
+既存のシート説明（`context-*`）や管理領域外の本文は保持します。
+
+| 項目 | 意味 |
+| --- | --- |
+| Stored range | 保存された worksheet dimension。書式だけのセルを含む場合があります。未記録なら unknown。 |
+| Content range | 値または数式のあるセルを囲む最小の矩形。空白だけの文字列も値として扱います。 |
+| Populated cells | 値または数式のあるセル数。0・FALSE・結果未保存の数式も対象。書式だけのセルは除外。 |
+| Tables | Excel で定義されたテーブル数。見た目の表は判定しません。 |
+| Shapes | 通常の図形・コネクタ数。グループの容器は数えず、内部の要素を個別に数えます。 |
+| Images / Charts | シート上の配置数。同じ画像の複数配置も別々に数えます。 |
+| Notes | 取得失敗・未対応項目の理由。 |
+
+集計は非表示シートも対象で、文字抽出の上限 `sync.max_extracted_text_chars` や
+AI 用の `generation.max_cells` には左右されません。広いセル範囲の面積をセル数にはしません。
+既知の空は `0`、空の存在範囲は `—`、不明・未対応は `unknown` として区別します。
+VML、OLE、コントロール、拡張オブジェクトなどを検出した場合は、部分的な個数を総数と誤認しないよう
+図形・画像・グラフ数を unknown とします。チャートシートなど worksheet 以外も未対応として記録します。
+数式の再計算や、保存後の未保存編集の取得は行いません。
+
+同じ結果を同期状態 `~/.tkn/excel_note/state/sync-state.json` の各 entry の
+`sheetInventory` に保存します。`schemaVersion: 1` と `sheets` 配列を持ち、
+各シートには `name`・`sheetId`・`state`・パッケージ内の `path`、
+`stored_range`・`content_range`・`populated_cells`・`tables`・`shapes`・`images`・`charts`・
+`warnings` を記録します。不明値は JSON の `null`、既知の空の存在範囲は空文字列です。
+VLM の対象選択に利用するための基礎情報であり、今回の追加で AI の対象選択・呼び出し条件は変わりません。
+
 ## Excel の更新をノートへ取り込む
 
 Excel を保存した後、同じコマンドを実行します。
@@ -135,7 +167,16 @@ tkn-excel-note status --source workbooks
 ```
 
 AI が不要な更新では `--context` を省略します。
-ファイル引数と `--source` をともに省略すると、設定済みの全 source が対象です。
+`pull` は対象を明示して実行します。`pull` のみ、または対象なしの `pull --context` / `pull --dry-run` はヘルプ表示のみで、設定の読み込み・探索・保存・AI 呼び出しを行いません。
+全 source を処理するときだけ `--all-sources` を指定します。
+
+```shell
+tkn-excel-note pull --all-sources --dry-run
+tkn-excel-note pull --all-sources
+```
+
+単体ファイル・`--source ID`・`--all-sources` は併用できません。`--context` を付けた場合も同じ対象指定が必要です。
+`push` は従来どおり、ファイル引数と `--source` をともに省略すると全 source が対象です。
 `push --note "book.xlsx.md"` で一括管理の中から対象ノートを絞れます。
 コマンドは呼び出したときに一度処理し、常駐監視はしません。
 通常の同期で Excel や代理ノートを削除することはありません。
@@ -152,7 +193,7 @@ AI が不要な更新では `--context` を省略します。
 | 固定 ID を Excel に付与 | `adopt` |
 | 元ブックのない代理ノートをバックアップして削除 | `delete-notes` |
 
-`pull --sheet "Sheet1" --context` で解析範囲を選べます。省略時は表示中の全シートです。
+`pull --source workbooks --sheet "Sheet1" --context` で解析範囲を選べます。省略時は表示中の全シートです。
 オプションの詳細は `tkn-excel-note pull --help` で確認できます。
 
 進捗・差分・人向けの集計は標準エラー出力、同期コマンドの結果は標準出力の 1 行 JSON です。

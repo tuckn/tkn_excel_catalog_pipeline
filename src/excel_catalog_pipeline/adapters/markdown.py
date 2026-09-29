@@ -251,11 +251,55 @@ def _render_map(workbook: WorkbookInfo) -> str:
         return f"- readStatus: {workbook.read_status}"
     if not workbook.sheets:
         return "- No sheet metadata extracted."
-    return "\n".join(
-        f"- {sheet.get('name', '')} (sheetId: {sheet.get('sheetId', '')}, "
-        f"state: {sheet.get('state', 'visible')})"
-        for sheet in workbook.sheets
+
+    def cell(value: object) -> str:
+        if value is None:
+            return "unknown"
+        if value == "":
+            return "—"
+        return (
+            str(value)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("|", "&#124;")
+            .replace("\\", "&#92;")
+            .replace("\r", " ")
+            .replace("\n", " ")
+        )
+
+    rows = [
+        "| Sheet | ID | State | Stored range | Content range | Populated cells | Tables | Shapes | Images | Charts | Notes |",
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for sheet in workbook.sheets:
+        inventory = workbook.sheet_inventory.get(sheet.get("sheetId", ""))
+        values: list[object] = [
+            sheet.get("name", ""),
+            sheet.get("sheetId", ""),
+            sheet.get("state", ""),
+        ]
+        for field in (
+            "stored_range",
+            "content_range",
+            "populated_cells",
+            "tables",
+            "shapes",
+            "images",
+            "charts",
+        ):
+            values.append(getattr(inventory, field) if inventory else None)
+        values.append("; ".join(inventory.warnings) if inventory else "Inventory unavailable")
+        rows.append("| " + " | ".join(cell(value) for value in values) + " |")
+    rows.extend(
+        [
+            "",
+            "Stored range: saved worksheet dimension; content range/cells: values or formulas, excluding formatting-only cells.",
+            "Tables: Excel tables. Shapes: individual shapes/connectors inside groups; images/charts: placements.",
+            "unknown: unavailable or unsupported; —: empty. Saved-file facts only; no Excel or AI execution.",
+        ]
     )
+    return "\n".join(rows)
 
 
 def _render_text(workbook: WorkbookInfo) -> str:

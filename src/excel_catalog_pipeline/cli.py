@@ -168,11 +168,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Apply Excel-to-Markdown changes; use --dry-run to preview.",
         description=(
             "Apply Excel-to-Markdown changes. Normal execution writes proxy notes, PNG cover attachments, and "
-            "synchronization state; use --dry-run for a read-only preview."
+            "synchronization state; use --dry-run for a read-only preview. "
+            "Select a workbook, --source ID, or --all-sources. Without a target, show help."
         ),
     )
     pull.add_argument(
-        "workbook", nargs="?", type=Path, help="One Excel file; omit to use configured sources."
+        "workbook",
+        nargs="?",
+        type=Path,
+        help="One Excel file; otherwise select --source ID or --all-sources.",
     )
     pull.add_argument("--output", type=Path, help="Proxy Markdown path for a single workbook.")
     pull.add_argument(
@@ -192,7 +196,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="With --context, regenerate and intentionally replace edited generated sections.",
     )
-    _add_common(pull)
+    targets = pull.add_mutually_exclusive_group()
+    targets.add_argument("--source", help="Process one configured source id.")
+    targets.add_argument(
+        "--all-sources", action="store_true", help="Explicitly process every configured source."
+    )
+    pull.set_defaults(_command_parser=pull)
     _add_execution_mode(pull, legacy_write_option="--write-notes")
     _add_preference(pull)
 
@@ -548,6 +557,15 @@ def _log_status_results(
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "pull":
+        pull_parser = args._command_parser
+        if args.workbook is not None and (args.source is not None or args.all_sources):
+            pull_parser.error("Use only one target: a workbook path, --source, or --all-sources")
+        if args.output is not None and args.workbook is None:
+            pull_parser.error("--output requires a single workbook path")
+        if args.workbook is None and args.source is None and not args.all_sources:
+            pull_parser.print_help()
+            return 0
     logger = configure_logging(
         quiet=args.quiet,
         verbose=args.verbose,
@@ -581,10 +599,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "pull":
-            if args.workbook is not None and args.source:
-                raise ConfigError("Use either a workbook path or --source")
-            if args.output is not None and args.workbook is None:
-                raise ConfigError("--output requires a single workbook path")
             if not args.context and (args.sheet or args.profile or args.force):
                 raise ConfigError("--sheet, --profile and --force require --context")
             if args.profile:

@@ -74,8 +74,18 @@ sources:
 def test_context_import_command_is_not_available() -> None:
     with pytest.raises(SystemExit) as failure:
         cli_module.build_parser().parse_args(
-            ["context", "import", "--source", "example", "--workbook", "book.xlsx",
-             "--sheet", "Data", "--markdown", "Data.md"]
+            [
+                "context",
+                "import",
+                "--source",
+                "example",
+                "--workbook",
+                "book.xlsx",
+                "--sheet",
+                "Data",
+                "--markdown",
+                "Data.md",
+            ]
         )
     assert failure.value.code == 2
 
@@ -98,7 +108,9 @@ def test_mutating_command_help_explains_normal_write_and_dry_run(capsys) -> None
     assert "Preview and validate planned changes without writing" in captured.out
     assert "workbooks, notes, state, cache, reports" in captured.out
     assert "or external" in captured.out
-    assert "Pull uses AI only when --context is explicitly selected" in " ".join(captured.out.split())
+    assert "Pull uses AI only when --context is explicitly selected" in " ".join(
+        captured.out.split()
+    )
     assert "--write-notes" in captured.out
     assert "Deprecated compatibility option" in captured.out
 
@@ -141,7 +153,7 @@ def test_config_init_creates_user_config(monkeypatch, tmp_path: Path, capsys) ->
     assert payload["status"] == "unchanged"
 
 
-def test_cli_pull_without_option_writes_note_state_and_report(
+def test_cli_pull_all_sources_writes_note_state_and_report(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:  # type: ignore[no-untyped-def]
     workbooks = tmp_path / "workbooks"
@@ -160,7 +172,16 @@ sources:
         encoding="utf-8",
     )
     monkeypatch.setattr(pipeline_module, "state_path", lambda: tmp_path / "state.json")
-    result = main(["--config", str(config), "--report-dir", str(tmp_path / "reports"), "pull"])
+    result = main(
+        [
+            "--config",
+            str(config),
+            "--report-dir",
+            str(tmp_path / "reports"),
+            "pull",
+            "--all-sources",
+        ]
+    )
     captured = capsys.readouterr()
     summary_path = next((tmp_path / "reports").glob("*-pull/summary.json"))
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -205,6 +226,7 @@ sources:
             "--report-dir",
             str(reports),
             "pull",
+            "--all-sources",
             "--dry-run",
         ]
     )
@@ -448,6 +470,7 @@ sources:
             "--report-dir",
             str(tmp_path / "reports"),
             "pull",
+            "--all-sources",
             "--dry-run",
             "--prefer-source",
         ]
@@ -498,6 +521,7 @@ def test_legacy_write_option_is_accepted_with_deprecation_warning(
             "--report-dir",
             str(tmp_path / "reports"),
             "pull",
+            "--all-sources",
             "--write-notes",
         ]
     )
@@ -603,3 +627,76 @@ def test_config_show_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> No
     assert "path" not in payload["config"]["sources"]["example"]
     assert "dir" in payload["config"]["sources"]["example"]["notes"]
     assert captured.err == ""
+
+
+@pytest.mark.parametrize("options", [[], ["--context"], ["--dry-run"], ["--context", "--force"]])
+def test_pull_without_target_shows_help_before_config_or_execution(monkeypatch, capsys, options):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("No config, scanning, AI, or writes allowed")
+
+    for name in ("load_config", "configure_logging", "run_pull", "run_ai_pull"):
+        monkeypatch.setattr(cli_module, name, forbidden)
+    assert main(["--config", "missing.yaml", "pull", *options]) == 0
+    captured = capsys.readouterr()
+    assert "usage: tkn-excel-note pull" in captured.out
+    assert "--all-sources" in captured.out
+    assert not captured.err
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--source", "one", "--all-sources"],
+        ["book.xlsx", "--all-sources"],
+        ["book.xlsx", "--source", "one"],
+        ["--all-sources", "--output", "note.md"],
+    ],
+)
+def test_pull_rejects_ambiguous_targets_before_loading(monkeypatch, capsys, options):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Must validate targets before loading")
+
+    monkeypatch.setattr(cli_module, "load_config", forbidden)
+    with pytest.raises(SystemExit) as exc:
+        main(["pull", *options])
+    assert exc.value.code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("context", [False, True])
+@pytest.mark.parametrize(
+    "target,expected",
+    [
+        (["--all-sources"], ["one", "two"]),
+        (["--source", "two"], ["two"]),
+    ],
+)
+def test_pull_selects_only_explicit_targets(
+    monkeypatch, tmp_path, capsys, context, target, expected
+):
+    from excel_catalog_pipeline.config import DEFAULT_CONFIG, validate_config
+
+    config = validate_config(
+        {
+            **DEFAULT_CONFIG,
+            "sources": {
+                name: {
+                    "path": str(tmp_path / name),
+                    "notes": {"root": str(tmp_path / (name + "-notes"))},
+                }
+                for name in ("one", "two")
+            }
+        }
+    )
+    monkeypatch.setattr(cli_module, "load_config", lambda **kwargs: config)
+    seen = []
+
+    def run(config, sources, **kwargs):
+        seen.extend(source.id for source in sources)
+        assert kwargs["write_notes"] is False
+        return []
+
+    monkeypatch.setattr(cli_module, "run_ai_pull" if context else "run_pull", run)
+    assert main(["pull", *target, "--dry-run", *(["--context"] if context else [])]) == 0
+    assert seen == expected
+    assert json.loads(capsys.readouterr().out)["writeEnabled"] is False
