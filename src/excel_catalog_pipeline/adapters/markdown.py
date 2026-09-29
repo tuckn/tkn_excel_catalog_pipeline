@@ -360,7 +360,6 @@ def render_note(
                     values["categories"], source.frontmatter_term_format
                 ),
                 "comments": values["comments"],
-                "files": existing_frontmatter.get("files", []),
                 "source_root": source.id,
                 "source_file_name": values["sourceFileName"],
                 "source_full_path": str(workbook.path),

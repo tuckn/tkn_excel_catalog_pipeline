@@ -9,7 +9,6 @@ author: {{ author }}
 keywords: {{ keywords }}
 categories: {{ categories }}
 comments: {{ comments }}
-files: {{ files }}
 sourceRoot: {{ source_root }}
 sourceFileName: {{ source_file_name }}
 sourceFullPath: {{ source_full_path }}

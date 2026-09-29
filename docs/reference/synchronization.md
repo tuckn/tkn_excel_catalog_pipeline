@@ -25,6 +25,7 @@
 AI 説明の鮮度と対象範囲は `contextStatus`、`contextAnalyzedSheets`、`contextOmittedSheets`、`contextGeneratedAt`、`contextSourceFingerprint` に記録します。[状態の意味](../guides/sheet-content.md#説明の状態)を参照してください。これらは Excel へ書き戻しません。
 本文の管理部分は既存ノートとの継続性のため `excel-catalog` マーカーで囲みます。
 未知の Frontmatter 項目と、マーカー外の手書き本文は保持します。
+`files` は同期に使用せず、自動追加しません。既存ノートにある場合は、その値を保持します。
 
 
 ## 比較から反映までの流れ

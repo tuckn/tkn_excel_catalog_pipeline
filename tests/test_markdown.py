@@ -92,7 +92,6 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
         "keywords",
         "categories",
         "comments",
-        "files",
         "sourceRoot",
         "sourceFileName",
         "sourceFullPath",
@@ -135,7 +134,6 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
         "keywords",
         "categories",
         "comments",
-        "files",
         "sourceRoot",
         "sourceFileName",
         "sourceFullPath",
@@ -166,6 +164,28 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
     assert [rendered.index(name) for name in template.managed_names] == sorted(
         rendered.index(name) for name in template.managed_names
     )
+
+
+@pytest.mark.parametrize("files", [[], ["[[Related document]]"]])
+def test_render_preserves_existing_files_but_does_not_restore_deleted_field(
+    tmp_path: Path, files: list[str]
+) -> None:
+    workbook_path = create_workbook(tmp_path / "book.xlsx")
+    source = config(tmp_path)
+    workbook = inspect_workbook(workbook_path, source, max_text_chars=1000)
+    note_path = tmp_path / "note.md"
+    note_path.write_text(render_note(workbook, source), encoding="utf-8")
+    note = read_note(note_path)
+    assert "files" not in note.frontmatter
+
+    note.frontmatter["files"] = files
+    note_path.write_text(render_note(workbook, source, existing=note), encoding="utf-8")
+    note = read_note(note_path)
+    assert note.frontmatter["files"] == files
+
+    del note.frontmatter["files"]
+    note_path.write_text(render_note(workbook, source, existing=note), encoding="utf-8")
+    assert "files" not in read_note(note_path).frontmatter
 
 
 def test_render_can_use_plain_keyword_and_category_values(tmp_path: Path) -> None:
