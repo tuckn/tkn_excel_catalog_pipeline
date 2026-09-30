@@ -352,6 +352,10 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         value = context_values[name]
         if name == "overrides":
             continue
+        if name == "max_input_chars":
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ConfigError("generation.max_input_chars must be a positive integer or null")
+            continue
         if isinstance(default, int):
             if type(value) is not int or value <= 0:
                 raise ConfigError(f"generation.{name} must be a positive integer")

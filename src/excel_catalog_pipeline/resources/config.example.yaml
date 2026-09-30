@@ -51,5 +51,5 @@ generation:
   image_dpi: 150
   max_cells: 10000
   max_objects: 10000
-  max_input_chars: 200000
+  max_input_chars: null  # Optional CLI limit on evidence JSON characters, excluding image bytes
   max_workbook_mb: 100

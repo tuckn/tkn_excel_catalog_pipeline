@@ -258,6 +258,63 @@ def test_failed_generation_preserves_previous_note_and_assets(build_setup, monke
     assert set((note.parent / "img").rglob("*")) == assets
 
 
+def test_local_links_are_plain_text_without_losing_other_links(build_setup, monkeypatch) -> None:
+    _, _, note, _, calls, run = build_setup
+
+    def generate(config, evidence, images, usage_path, logger, *, profile, on_usage):
+        calls.append(evidence["sheet"])
+        on_usage({"inputTokens": 1, "outputTokens": 2, "durationSeconds": 1})
+        return (
+            "### References\n\n"
+            "[Local diagram](C:\\example\\diagram.png) and "
+            "[Reference](https://example.org/guide)\n\n"
+            "`[code sample](C:\\example\\path)`\n\n"
+            "```md\n[example link](file:///C:/example/path)\n```\n\n"
+            f"![Evidence]({evidence['images'][0]['relativePath']})"
+        )
+
+    monkeypatch.setattr(context, "generate_markdown", generate)
+    result = run()
+    assert result["status"] == "success"
+    assert result["results"][0]["localLinksConverted"] == 1
+    assert calls == ["Data"]
+    block = context.existing_block(note.read_text(encoding="utf-8-sig"), "1")
+    assert block is not None
+    assert "Local diagram and [Reference](https://example.org/guide)" in block
+    assert "C:\\example\\diagram.png" not in block
+    assert "`[code sample](C:\\example\\path)`" in block
+    assert "[example link](file:///C:/example/path)" in block
+
+
+def test_local_link_diagnostics_do_not_include_targets() -> None:
+    markdown, converted = context._prepare_markdown(
+        "[File](file:///C:/example/book.xlsx) [Temp](/tmp/example.png) "
+        "[Network](\\\\example-server\\share\\book.xlsx) "
+        "[Web](https://example.org/a)",
+        set(),
+    )
+    assert markdown == "File Temp Network [Web](https://example.org/a)"
+    assert converted == [(1, "file URL"), (1, "temporary path"), (1, "network path")]
+    with pytest.raises(ContextError, match=r"nonportable drive path link at line 2") as error:
+        context._prepare_markdown("Intro\n[](C:\\example\\book.xlsx)", set())
+    assert "example" not in str(error.value)
+
+
+def test_unrecognized_image_path_still_rejected_without_publishing(build_setup, monkeypatch) -> None:
+    source, _, note, _, _, run = build_setup
+    before = note.read_bytes()
+
+    def generate(*args, **kwargs):
+        return "### Image\n\n![Wrong](C:\\example\\image.png)"
+
+    monkeypatch.setattr(context, "generate_markdown", generate)
+    result = run()
+    assert result["status"] == "error"
+    assert "unrecognized image path at line 3" in result["results"][0]["message"]
+    assert note.read_bytes() == before
+    assert not (source.note_root / "img").exists()
+
+
 def test_concurrent_editor_change_is_preserved(build_setup, monkeypatch) -> None:
     _, _, note, _, _, run = build_setup
     before = note.read_bytes()

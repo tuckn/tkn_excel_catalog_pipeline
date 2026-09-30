@@ -26,6 +26,7 @@ from .context_profiles import load_prompt, profile_name, prompt_digest
 from .context_provider import (
     PROMPT_VERSION,
     atomic_json,
+    evidence_payload,
     generate_markdown,
     generation_plan,
     resolve_profile,
@@ -156,18 +157,75 @@ def note_lock(note: Path) -> Iterator[None]:
         location.unlink(missing_ok=True)
 
 
-def _validate_markdown(markdown: str, image_paths: set[str]) -> None:
+def _visible_markdown(markdown: str) -> str:
+    """Mask code while retaining offsets for Markdown link diagnostics."""
+    visible = list(markdown)
+    fence: tuple[str, int] | None = None
+    offset = 0
+    for line in markdown.splitlines(keepends=True):
+        marker = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})", line)
+        if fence is not None:
+            visible[offset : offset + len(line)] = " " * len(line)
+            if marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= fence[1]:
+                fence = None
+        elif marker:
+            fence = (marker.group(1)[0], len(marker.group(1)))
+            visible[offset : offset + len(line)] = " " * len(line)
+        offset += len(line)
+    exposed = "".join(visible)
+    ticks = list(re.finditer(r"`+", exposed))
+    index = 0
+    while index < len(ticks):
+        opening = ticks[index]
+        closing = next(
+            (candidate for candidate in ticks[index + 1 :] if len(candidate.group()) == len(opening.group())),
+            None,
+        )
+        if closing is None:
+            index += 1
+            continue
+        visible[opening.start() : closing.end()] = " " * (closing.end() - opening.start())
+        index = ticks.index(closing) + 1
+    return "".join(visible)
+
+
+def _local_link_kind(target: str) -> str | None:
+    candidate = target.strip().removeprefix("<")
+    if re.match(r"[A-Za-z]:[\\/]", candidate):
+        return "drive path"
+    if candidate.startswith("\\\\"):
+        return "network path"
+    if candidate.lower().startswith("file://"):
+        return "file URL"
+    if candidate.startswith("/tmp/"):
+        return "temporary path"
+    return None
+
+
+def _prepare_markdown(markdown: str, image_paths: set[str]) -> tuple[str, list[tuple[int, str]]]:
     if "<!-- excel-catalog:" in markdown or markdown.lstrip().startswith("---"):
         raise ContextError("Generated Markdown contains reserved markers or unexpected Frontmatter")
+    visible = _visible_markdown(markdown)
+    links = list(re.finditer(r"(!?)\[([^\]]*)\]\(([^)]+)\)", visible))
     # All embedded images must be durable caller-provided assets, not temporary paths.
-    for target in re.findall(r"!\[[^\]]*\]\(([^)]+)\)", markdown):
-        if target.strip("<>") not in image_paths:
-            raise ContextError("Generated Markdown contains an unrecognized image path")
-    targets = re.findall(r"!?\[[^\]]*\]\(([^)]+)\)", markdown)
-    if any(re.search(r"(?:[A-Za-z]:[\\/]|file://|/tmp/)", target) for target in targets):
-        raise ContextError(
-            "Generated Markdown contains an absolute local path; refusing temporary/nonportable links"
-        )
+    for match in links:
+        if match.group(1) == "!" and match.group(3).strip("<>") not in image_paths:
+            line = markdown.count("\n", 0, match.start()) + 1
+            raise ContextError(f"Generated Markdown contains an unrecognized image path at line {line}")
+    replacements: list[tuple[int, int, str]] = []
+    converted: list[tuple[int, str]] = []
+    for match in links:
+        kind = _local_link_kind(match.group(3))
+        if kind is None:
+            continue
+        line = markdown.count("\n", 0, match.start()) + 1
+        if match.group(1) == "!" or not match.group(2).strip():
+            raise ContextError(f"Generated Markdown contains a nonportable {kind} link at line {line}")
+        replacements.append((match.start(), match.end(), markdown[match.start(2) : match.end(2)]))
+        converted.append((line, kind))
+    for start, end, label in reversed(replacements):
+        markdown = markdown[:start] + label + markdown[end:]
+    return markdown, converted
 
 
 def build_context(
@@ -198,8 +256,7 @@ def build_context(
         for sheet in selected
     ]
     for evidence in prepared:
-        if len(json.dumps(evidence, ensure_ascii=False)) > config.max_input_chars:
-            raise ContextError("Evidence exceeds generation.max_input_chars; no AI was called")
+        evidence_payload(evidence, config.max_input_chars)
     logger.info(
         "Reading a saved-file snapshot; unsaved edits in Excel are not included. SHA256=%s",
         digest(data),
@@ -276,7 +333,8 @@ def build_context(
                 result["cellCount"] = len(evidence["cells"])
                 result["objectCount"] = len(evidence["objects"])
                 logger.info(
-                    "Sheet %s: would render and generate context; token count unavailable until execution.",
+                    "Sheet %s: would render and generate context; final evidence size, image count, "
+                    "and tokens are unavailable until execution.",
                     sheet["name"],
                 )
                 continue
@@ -308,7 +366,18 @@ def build_context(
                     on_usage=records.append,
                 )
                 markdown = markdown.replace("\r\n", "\n")
-                _validate_markdown(markdown, {image["relativePath"] for image in images})
+                markdown, converted = _prepare_markdown(
+                    markdown, {image["relativePath"] for image in images}
+                )
+                if converted:
+                    result["localLinksConverted"] = len(converted)
+                    logger.warning(
+                        "Converted %d generated local link(s) to plain text; first=%s at line %d. "
+                        "Link targets were not logged.",
+                        len(converted),
+                        converted[0][1],
+                        converted[0][0],
+                    )
                 newline = "\r\n" if b"\r\n" in original else "\n"
                 links = "\n".join(
                     f"- [{image['range']} ({'overview' if image['overview'] else 'detail'})]({image['relativePath']})"
@@ -475,10 +544,7 @@ def _build_overview(
         for sheet in selected
     ]
     evidence = {"sheet": "Workbook overview", "notes": notes, "omittedSheets": omitted}
-    if len(json.dumps(evidence, ensure_ascii=False)) > config.max_input_chars:
-        raise ContextError(
-            "Workbook overview input exceeds generation.max_input_chars; no text was truncated"
-        )
+    evidence_payload(evidence, config.max_input_chars)
     key = digest(
         json.dumps(
             {"evidence": evidence, "prompt": prompt, "config": asdict(config), "bridge": plan},
@@ -501,7 +567,16 @@ def _build_overview(
             stage="workbook",
             on_usage=records.append,
         ).replace("\r\n", "\n")
-        _validate_markdown(markdown, set())
+        markdown, converted = _prepare_markdown(markdown, set())
+        if converted:
+            result["localLinksConverted"] = len(converted)
+            logger.warning(
+                "Converted %d generated local link(s) to plain text; first=%s at line %d. "
+                "Link targets were not logged.",
+                len(converted),
+                converted[0][1],
+                converted[0][0],
+            )
         heading = "ブック全体の説明" if profile_name(config) == "default-ja" else "Workbook context"
         scope = json.dumps(names, ensure_ascii=False)
         omitted_text = json.dumps(omitted, ensure_ascii=False)

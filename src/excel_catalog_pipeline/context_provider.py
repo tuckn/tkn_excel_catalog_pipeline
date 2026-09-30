@@ -44,6 +44,39 @@ SCHEMA = {
 SCHEMA_NAME = "excel_sheet_context"
 
 
+def evidence_payload(evidence: dict[str, Any], max_chars: int | None) -> tuple[str, int, bool]:
+    """Serialize all evidence values, preferring the shorter representation."""
+    ordinary = json.dumps(evidence, ensure_ascii=False, separators=(",", ":"))
+    compact = dict(evidence)
+    converted = False
+    for key in ("cells", "objects", "nativeShapes"):
+        items = compact.get(key)
+        if not isinstance(items, list) or not items or not all(isinstance(item, dict) for item in items):
+            continue
+        columns = list(dict.fromkeys(field for item in items for field in item))
+        compact[key] = {
+            "columns": columns,
+            "rows": [[item.get(field) for field in columns] for item in items],
+        }
+        converted = True
+    if converted:
+        compact["tableEncoding"] = (
+            "In cells, objects and nativeShapes tables, each row follows columns in order; "
+            "null means a field is unavailable."
+        )
+    compact_payload = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+    use_tables = converted and len(compact_payload) < len(ordinary)
+    payload = compact_payload if use_tables else ordinary
+    if max_chars is not None and len(payload) > max_chars:
+        encoding = "column tables" if use_tables else "ordinary JSON"
+        raise ContextError(
+            f"Evidence requires {len(payload):,} characters using {encoding} "
+            f"(ordinary JSON: {len(ordinary):,}); generation.max_input_chars={max_chars:,}. "
+            "No AI was called or content truncated."
+        )
+    return payload, len(ordinary), use_tables
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -148,11 +181,14 @@ def generate_markdown(
     on_usage: Callable[[dict[str, Any]], None] | None = None,
 ) -> str:
     connection = profile if profile is not None else resolve_profile(config)
-    payload = json.dumps(evidence, ensure_ascii=False, separators=(",", ":"))
-    if len(payload) > config.max_input_chars:
-        raise ContextError(
-            "Evidence exceeds generation.max_input_chars; no AI was called or text truncated"
-        )
+    payload, ordinary_chars, compact = evidence_payload(evidence, config.max_input_chars)
+    logger.info(
+        "AI evidence: %d characters (%s; ordinary JSON=%d; configured limit=%s).",
+        len(payload),
+        "column tables" if compact else "ordinary JSON",
+        ordinary_chars,
+        config.max_input_chars if config.max_input_chars is not None else "none",
+    )
     if (stage == "sheet" and not images) or len(images) > config.max_images:
         raise ContextError("Sheet generation requires between 1 and generation.max_images images")
     prompt = load_prompt(config, stage=stage) + "\nSOURCE EVIDENCE (JSON):\n" + payload
@@ -181,6 +217,9 @@ def generate_markdown(
         "images": [image.model_dump(mode="json") for image in plan.images],
         "sheet": evidence["sheet"],
         "imageCount": len(images),
+        "evidenceChars": len(payload),
+        "ordinaryEvidenceChars": ordinary_chars,
+        "evidenceEncoding": "column-tables" if compact else "ordinary-json",
         "promptVersion": PROMPT_VERSION,
         "promptProfile": profile_name(config),
         "promptSha256": hashlib.sha256(load_prompt(config, stage=stage).encode()).hexdigest(),

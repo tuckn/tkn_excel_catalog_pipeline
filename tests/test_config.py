@@ -332,6 +332,25 @@ def test_generation_bridge_overrides_are_preserved():
     assert config_module.config_as_dict(config)["generation"]["overrides"] == data["generation"]["overrides"]
 
 
+def test_evidence_character_limit_is_optional_and_can_be_set():
+    defaults = config_module.validate_config(config_module.DEFAULT_CONFIG)
+    assert defaults.context.max_input_chars is None
+    assert config_as_dict(defaults)["generation"]["max_input_chars"] is None
+
+    limited = config_module.validate_config(
+        {**config_module.DEFAULT_CONFIG, "generation": {"max_input_chars": 300000}}
+    )
+    assert limited.context.max_input_chars == 300000
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "200000", 1.5])
+def test_evidence_character_limit_rejects_invalid_values(value):
+    with pytest.raises(ConfigError, match="generation.max_input_chars"):
+        config_module.validate_config(
+            {**config_module.DEFAULT_CONFIG, "generation": {"max_input_chars": value}}
+        )
+
+
 def test_generation_layer_precedence(tmp_path, monkeypatch):
     shared = tmp_path / "global.yaml"
     shared.write_text("generation:\n  overrides:\n    model: base-model\n    timeout_seconds: 600\n")

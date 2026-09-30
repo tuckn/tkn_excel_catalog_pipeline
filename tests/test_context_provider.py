@@ -82,6 +82,66 @@ def test_real_bridge_receives_ordered_images_schema_and_journals_usage(setup_pro
     assert str(image) not in journal.read_text()
 
 
+def test_oversize_evidence_uses_column_tables_without_dropping_values(setup_provider, monkeypatch):
+    image, journal = setup_provider
+    cells = [
+        {
+            "cell": f"A{index}",
+            "text": f"key {index}",
+            "type": "s",
+            "style": "0",
+            "formula": None,
+            "boundsPoints": {"left": 1, "top": 2, "right": 3, "bottom": 4},
+            "displayText": f"key {index}",
+        }
+        for index in range(60)
+    ]
+    evidence = {"sheet": "Data", "cells": cells, "objects": [], "nativeShapes": []}
+    ordinary = json.dumps(evidence, ensure_ascii=False, separators=(",", ":"))
+    assert len(ordinary) > 6000
+
+    def run(command, prompt, *args, **kwargs):
+        payload = json.loads(prompt.split("SOURCE EVIDENCE (JSON):\n", 1)[1])
+        assert len(json.dumps(payload, ensure_ascii=False, separators=(",", ":"))) <= 6000
+        table = payload["cells"]
+        assert len(table["rows"]) == len(cells)
+        for original, row in zip(cells, table["rows"], strict=True):
+            assert dict(zip(table["columns"], row, strict=True)) == original
+        Path(command[command.index("--output-last-message") + 1]).write_text(
+            '{"markdown":"### Good"}'
+        )
+        return '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":3}}'
+
+    monkeypatch.setattr(cli, "run_process", run)
+    result = provider.generate_markdown(
+        ContextConfig(max_input_chars=6000), evidence, [image], journal, LOGGER
+    )
+    assert result == "### Good"
+    record = json.loads(journal.read_text())
+    assert record["status"] == "success"
+    assert record["evidenceEncoding"] == "column-tables"
+    assert record["evidenceChars"] <= 6000 < record["ordinaryEvidenceChars"]
+
+
+def test_oversize_evidence_reports_required_characters_before_ai(setup_provider, monkeypatch):
+    image, journal = setup_provider
+    evidence = {"sheet": "Data", "cells": [{"cell": "A1", "text": "x" * 250}]}
+    monkeypatch.setattr(cli, "run_process", lambda *a, **k: pytest.fail("AI must not run"))
+    with pytest.raises(ContextError, match=r"Evidence requires .+generation.max_input_chars=100"):
+        provider.generate_markdown(
+            ContextConfig(max_input_chars=100), evidence, [image], journal, LOGGER
+        )
+    assert not journal.exists()
+
+
+def test_default_does_not_limit_evidence_json_characters():
+    evidence = {"sheet": "Data", "cells": [{"cell": "A1", "text": "x" * 210000}]}
+    payload, ordinary_chars, compact = provider.evidence_payload(evidence, None)
+    assert len(payload) > 200000
+    assert ordinary_chars == len(payload)
+    assert compact is False
+
+
 @pytest.mark.parametrize("code", ["timeout", "process_exit"])
 def test_failed_bridge_call_keeps_known_subtotal_and_does_not_retry(
     setup_provider, monkeypatch, code

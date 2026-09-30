@@ -79,7 +79,7 @@ class ContextConfig:
     image_dpi: int = 150
     max_cells: int = 10000
     max_objects: int = 10000
-    max_input_chars: int = 200000
+    max_input_chars: int | None = None
     max_workbook_mb: int = 100
 
 
