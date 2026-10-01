@@ -22,7 +22,7 @@ CLI は次の順に設定を読み、後の値を優先します。
 
 | 設定 | 動作 |
 | --- | --- |
-| `schema_version` | 同梱例の値は `"1.3.0"` です。 |
+| `schema_version` | 同梱例の値は `"2.0.0"` です。 |
 | `sources.<id>` | 入力ブックと代理ノートの保存先をまとめる名前です。`--source <id>` で選びます。 |
 | `sources.<id>.workbooks_dir` | 入力ブックのルートフォルダです。 |
 | `sources.<id>.recursive` | 既定は `false`。`true` にするとサブフォルダも調べます。 |
@@ -95,7 +95,16 @@ cover:
 
 ## contextのprofile
 
-`generation.prompt_profile` は文章のprofile名（既定 `auto`）、`generation.profile_dirs` はユーザー定義profileを置いた親フォルダの一覧（既定 `[]`）です。CLIの `pull --context --profile <名前>` が設定より優先します。`profile_dirs` は上位の設定で一覧全体を置き換え、相対パスは実行時の作業フォルダから解決します。
+`generation.prompt_profile` の既定は `default-ja`（日本語）です。英語は `default-en` を指定します。生成言語はprofile内の `template.md` / `workbook-template.md` の `language` によって決まり、それぞれのプロンプトの `{{language}}` に渡されます。見出しはテンプレート本文・`labels` が定義します。ブック本文やOSによる言語の自動判定は行いません。
+
+```yaml
+generation:
+  prompt_profile: default-en
+```
+
+`generation.language` と `prompt_profile: auto` / `--profile auto` は廃止しました。残っていると設定または引数エラーになります。[旧言語設定からの移行](../guides/sheet-content.md#旧言語設定からの移行)を参照してください。旧スキーマの読み込み条件も同節に記載しています。
+
+`generation.prompt_profile` は文章のprofile名（既定 `default-ja`）、`generation.profile_dirs` はユーザー定義profileを置いた親フォルダの一覧（既定 `[]`）です。CLIの `pull --context --profile <名前>` が設定より優先します。`profile_dirs` は上位の設定で一覧全体を置き換え、相対パスは実行時の作業フォルダから解決します。
 
 ```yaml
 generation:

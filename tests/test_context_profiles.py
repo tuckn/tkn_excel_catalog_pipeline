@@ -181,3 +181,39 @@ def test_config_accepts_custom_name_and_resolves_directory_paths(tmp_path, monke
     )
     assert config.context.profile_dirs == (str(tmp_path / "profiles"),)
     assert config_as_dict(config)["generation"]["prompt_profile"] == "technical-notes"
+
+
+def test_default_profile_is_japanese_without_a_separate_language_setting():
+    from excel_catalog_pipeline.config import DEFAULT_CONFIG, config_as_dict, validate_config
+
+    config = validate_config(DEFAULT_CONFIG)
+    generation = config_as_dict(config)["generation"]
+    assert generation["prompt_profile"] == "default-ja"
+    assert "language" not in generation
+    assert load_context_profile(config.context).name == "default-ja"
+
+
+@pytest.mark.parametrize("stage", ["sheet", "workbook"])
+def test_template_controls_language_for_each_generation_stage(tmp_path, stage):
+    config, folder = custom_profile(tmp_path)
+    prefix = "" if stage == "sheet" else "workbook-"
+    template = folder / (prefix + "template.md")
+    before = load_context_profile(config, stage=stage)
+    template.write_text(
+        template.read_text(encoding="utf-8").replace("language: Japanese", "language: French"),
+        encoding="utf-8",
+    )
+    changed = load_context_profile(config, stage=stage)
+    assert "in French" in changed.prompt
+    assert "{{language}}" not in changed.prompt
+    assert changed.prompt_sha256 != before.prompt_sha256
+    assert changed.sha256 != before.sha256
+    other_stage = "workbook" if stage == "sheet" else "sheet"
+    assert "in Japanese" in load_context_profile(config, stage=other_stage).prompt
+
+
+def test_auto_profile_is_rejected_even_when_custom_folder_exists(tmp_path):
+    config, folder = custom_profile(tmp_path)
+    folder.rename(folder.with_name("auto"))
+    with pytest.raises(ContextError, match="'auto' was removed"):
+        load_context_profile(replace(config, prompt_profile="auto"))

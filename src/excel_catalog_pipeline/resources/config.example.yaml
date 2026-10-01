@@ -1,4 +1,4 @@
-schema_version: "1.3.0"
+schema_version: "2.0.0"
 
 sources:
   personal-excel:
@@ -35,9 +35,13 @@ sync:
 # Evidence images live in the proxy note's sibling img/ directory.
 generation:
   # Context profile bundle: built-in default-ja/default-en or a custom directory name.
-  prompt_profile: auto
+  # The selected profile templates define the generation language and headings.
+  # Default: default-ja (Japanese). Select default-en for English.
+  prompt_profile: default-ja
+
   # Ordered parent directories containing custom profile folders; first match wins.
   profile_dirs: []
+
   # Select an image-capable model in the shared profile.
   # Examples: claude-default, copilot-default, antigravity-default, local-vision, azure-quality.
   bridge_profile: codex-default
@@ -45,7 +49,6 @@ generation:
   # Example per-application override:
   # overrides:
   #   timeout_seconds: 600
-  language: Japanese
   max_images: 24
   tile_width_points: 1200
   tile_height_points: 800

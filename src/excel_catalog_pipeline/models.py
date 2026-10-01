@@ -70,8 +70,7 @@ class SyncConfig:
 class ContextConfig:
     bridge_profile: str = "codex-default"
     overrides: dict[str, Any] = field(default_factory=dict)
-    language: str = "Japanese"
-    prompt_profile: str = "auto"
+    prompt_profile: str = "default-ja"
     profile_dirs: tuple[str, ...] = ()
     max_images: int = 24
     tile_width_points: int = 1200

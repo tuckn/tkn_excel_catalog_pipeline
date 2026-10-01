@@ -45,7 +45,9 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --
 tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile default-ja
 ```
 
-`--profile` は文章のprofileです。同梱の `default-ja` / `default-en` とユーザー定義profileを選べます。[本文構成とprofileの作り方](docs/guides/sheet-content.md#contextのprofile)を参照してください。
+`--profile` は文章の構成と言語を選びます。既定は `default-ja`（日本語）です。英語は `default-en`、独自の構成や言語はユーザー定義profileを指定します。生成言語は各profileのテンプレートで管理します。[本文構成とprofileの作り方](docs/guides/sheet-content.md#contextのprofile)を参照してください。
+
+2.0.0では `generation.language` と `prompt_profile: auto` を廃止しました。旧設定が残っている場合は、[言語設定の移行手順](docs/guides/sheet-content.md#旧言語設定からの移行)に沿って修正してください。
 
 画像と抽出根拠はノートと同じ階層の `img/` に保存します。
 生成した説明には解釈が含まれるため、重要な判断に使う箇所は元シートと見比べてください。

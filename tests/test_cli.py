@@ -14,6 +14,13 @@ from excel_catalog_pipeline.models import Action
 from .helpers import create_workbook
 
 
+@pytest.fixture(autouse=True)
+def isolated_cli_configuration(monkeypatch, tmp_path):
+    """CLI tests must not load the operator's user or project configuration."""
+    monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "user.yaml")
+    monkeypatch.chdir(tmp_path)
+
+
 def test_cli_uses_tkn_prefixed_program_name() -> None:
     assert cli_module.build_parser().prog == "tkn-excel-note"
 
@@ -129,7 +136,7 @@ def test_config_show_prints_path_before_indented_json(monkeypatch, tmp_path: Pat
     assert payload["command"] == "config show"
     assert payload["config"]["loadedConfigFiles"] == [str(config.resolve())]
     assert payload["config"]["sources"] == {}
-    assert '\n  "config": {\n    "schema_version": "1.3.0",' in body
+    assert '\n  "config": {\n    "schema_version": "2.0.0",' in body
     assert captured.err == ""
 
 
@@ -685,7 +692,7 @@ def test_pull_selects_only_explicit_targets(
                     "notes": {"root": str(tmp_path / (name + "-notes"))},
                 }
                 for name in ("one", "two")
-            }
+            },
         }
     )
     monkeypatch.setattr(cli_module, "load_config", lambda **kwargs: config)
@@ -700,3 +707,17 @@ def test_pull_selects_only_explicit_targets(
     assert main(["pull", *target, "--dry-run", *(["--context"] if context else [])]) == 0
     assert seen == expected
     assert json.loads(capsys.readouterr().out)["writeEnabled"] is False
+
+
+def test_profile_auto_is_rejected_before_loading_config(monkeypatch, capsys):
+    def unexpected_load(**kwargs):
+        pytest.fail("Removed --profile auto must fail before config/workbook access")
+
+    monkeypatch.setattr(cli_module, "load_config", unexpected_load)
+    with pytest.raises(SystemExit) as failure:
+        main(["pull", "book.xlsx", "--context", "--profile", "auto"])
+    assert failure.value.code == 2
+    captured = capsys.readouterr()
+    assert "auto' was removed" in captured.err
+    assert "default-ja, default-en, or a custom profile" in captured.err
+    assert captured.out == ""

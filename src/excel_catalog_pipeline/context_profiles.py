@@ -51,12 +51,6 @@ class ContextProfile:
         }
 
 
-def profile_name(config: ContextConfig) -> str:
-    if config.prompt_profile != "auto":
-        return config.prompt_profile
-    return "default-en" if config.language.lower() in {"english", "en"} else "default-ja"
-
-
 def _no_external_refs(value: Any) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -71,7 +65,12 @@ def _no_external_refs(value: Any) -> None:
 
 
 def load_context_profile(config: ContextConfig, *, stage: str = "sheet") -> ContextProfile:
-    name = profile_name(config)
+    name = config.prompt_profile
+    if name == "auto":
+        raise ContextError(
+            "Context profile 'auto' was removed; select default-ja, default-en, "
+            "or a custom profile with its own template language"
+        )
     if not NAME.fullmatch(name) or name in {".", ".."}:
         raise ContextError(f"Unknown context profile: {name}; use a profile directory name")
     if stage not in {"sheet", "workbook"}:
@@ -145,8 +144,7 @@ def load_context_profile(config: ContextConfig, *, stage: str = "sheet") -> Cont
     minimum_heading = 4 if stage == "sheet" else 3
     if any(len(heading) < minimum_heading for heading in re.findall(r"(?m)^(#{1,6}) ", template)):
         raise ContextError("Context template headings would escape the enclosing section")
-    language = config.language if config.prompt_profile == "auto" else metadata["language"]
-    prompt = prompt.replace("{{language}}", language)
+    prompt = prompt.replace("{{language}}", metadata["language"])
     if not prompt.strip():
         raise ContextError("Context prompt cannot be empty")
     hashes = [

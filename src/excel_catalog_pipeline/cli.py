@@ -80,6 +80,14 @@ def _preference(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _context_profile_name(value: str) -> str:
+    if value == "auto":
+        raise argparse.ArgumentTypeError(
+            "'auto' was removed; select default-ja, default-en, or a custom profile"
+        )
+    return value
+
+
 def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--source", help="Limit the command to one configured source id.")
 
@@ -206,7 +214,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="AI sheet selection, repeatable; default: all visible worksheets.",
     )
     pull.add_argument(
-        "--profile", help="Context profile name (built-in or generation.profile_dirs)."
+        "--profile",
+        type=_context_profile_name,
+        help=(
+            "Context profile defining structure and language "
+            "(built-in or generation.profile_dirs); default: configured profile or default-ja."
+        ),
     )
     pull.add_argument(
         "--force",

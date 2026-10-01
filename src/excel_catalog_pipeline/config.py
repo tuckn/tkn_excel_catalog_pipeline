@@ -27,7 +27,7 @@ from .models import (
 from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
-SCHEMA_VERSION = "1.3.0"
+SCHEMA_VERSION = "2.0.0"
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
     "sources": {},
@@ -156,8 +156,26 @@ def init_user_config(*, force: bool = False, target: Path | None = None) -> tupl
 
 
 def _generation_settings(raw: dict[str, Any]) -> dict[str, Any]:
-    """Validate Bridge overrides in one config layer."""
+    """Validate generation settings and reject retired options in each layer."""
     values = deepcopy(raw)
+    if "language" in values or values.get("prompt_profile") == "auto":
+        name = values.get("prompt_profile")
+        language = values.get("language", "Japanese")
+        if isinstance(name, str) and name.strip() and name != "auto":
+            migration = f"keep generation.prompt_profile: {name}"
+        elif isinstance(language, str) and language.lower() in {"english", "en"}:
+            migration = "set generation.prompt_profile: default-en"
+        elif isinstance(language, str) and language.lower() in {"japanese", "ja"}:
+            migration = "set generation.prompt_profile: default-ja"
+        else:
+            migration = (
+                "select a custom generation.prompt_profile with the intended template language"
+            )
+        raise ConfigError(
+            "generation.language and generation.prompt_profile: auto were removed; "
+            f"remove generation.language and {migration}. "
+            "Language is defined by the selected profile templates."
+        )
     overrides = values.get("overrides", {})
     if not isinstance(overrides, dict):
         raise ConfigError("generation.overrides must be a mapping")
@@ -220,7 +238,8 @@ def _normalize_layer(data: dict[str, Any]) -> dict[str, Any]:
         raise ConfigError("schema_version must be a quoted MAJOR.MINOR.PATCH version")
     parts = tuple(map(int, version.split(".")))
     current = tuple(map(int, SCHEMA_VERSION.split(".")))
-    if parts[0] != current[0] or parts > current:
+    legacy = parts[0] == 1 and parts <= (1, 3, 0)
+    if not legacy and (parts[0] != current[0] or parts > current):
         raise ConfigError(f"Unsupported schema_version: {version!r}; supported {SCHEMA_VERSION}")
     values["schema_version"] = SCHEMA_VERSION
     # Translate prior path names per layer before validating and merging sources.
@@ -371,7 +390,7 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         elif not isinstance(value, str) or not value.strip():
             raise ConfigError(f"generation.{name} must be a non-empty string")
     if re.fullmatch(r"[a-z0-9][a-z0-9._-]*", context_values["prompt_profile"]) is None:
-        raise ConfigError("generation.prompt_profile must be a profile directory name or auto")
+        raise ConfigError("generation.prompt_profile must be a profile directory name")
     if context_values["overlap_points"] * 2 >= min(
         context_values["tile_width_points"], context_values["tile_height_points"]
     ):

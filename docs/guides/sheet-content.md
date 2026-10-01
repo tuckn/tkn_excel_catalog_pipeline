@@ -157,7 +157,8 @@ AI 呼び出しは自動再試行しません。使用量の記録や未使用�
 | ---------------------------------------------- | ------------------ | ---------------------------------------------------- |
 | `bridge_profile`                             | `codex-default`  | GenAI Bridge共有設定のプロファイル名                 |
 | `overrides`                                  | `{}`             | 共有プロファイルに重ねるアプリ固有の設定             |
-| `language`                                   | `Japanese`       | 生成文の言語                                         |
+| `prompt_profile` | `default-ja` | 構成と言語を定義するprofile名 |
+| `profile_dirs` | `[]` | ユーザー定義profileの親フォルダ。先に見つかった同名フォルダを優先 |
 | `max_images`                                 | `24`             | 1 シートの全体図を含む画像数の上限。最大`100`      |
 | `tile_width_points` / `tile_height_points` | `1200` / `800` | 詳細画像の幅・高さ。Excel のポイント単位             |
 | `overlap_points`                             | `80`             | 隣接画像の重なり。幅・高さの小さい方の半分未満       |
@@ -174,7 +175,7 @@ AI 呼び出しは自動再試行しません。使用量の記録や未使用�
 
 ### contextのprofile
 
-`--profile` は文章の作り方・出力言語を選びます。AI 接続先を選ぶ `generation.bridge_profile` とは別です。優先順位はCLIの `--profile`、有効な設定の `generation.prompt_profile`、既定の `auto` です。
+`--profile` は文章の作り方・出力言語を選びます。AI 接続先を選ぶ `generation.bridge_profile` とは別です。優先順位はCLIの `--profile`、有効な設定の `generation.prompt_profile`、既定の `default-ja` です。
 
 ```yaml
 generation:
@@ -183,7 +184,15 @@ generation:
   bridge_profile: codex-default
 ```
 
-`auto` は `generation.language` が `English` / `en` のとき `default-en`、それ以外は `default-ja` を使い、プロンプトの言語指定には設定の値を渡します。profile名を明示すると、テンプレートの `language` が優先されます。
+設定キーの正式名は `generation.prompt_profile` です。profileが文章の構成と言語をまとめて定義します。
+
+| profile | 言語 |
+| --- | --- |
+| `default-ja`（省略時の既定） | 日本語 |
+| `default-en` | 英語 |
+| ユーザー定義profile | そのテンプレートで指定した言語 |
+
+生成文の言語には、シート用 `template.md` とブック用 `workbook-template.md` のFrontmatterにある `language` を使います。それぞれのプロンプトの `{{language}}` に値を渡します。見出しと表示文言はテンプレート本文・`labels` が定義するため、独自の言語に変えるときはこれらも揃えて編集してください。ブック本文やOSから言語を自動判定することはありません。
 
 同梱フォルダは `src/excel_catalog_pipeline/context_profiles/default-ja/` と `default-en/` です。各フォルダに次の6ファイルがあります。
 
@@ -212,11 +221,36 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile 
 tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile technical-notes
 ```
 
-`profile_dirs` は設定順に探索し、最初に見つかった同名フォルダを使います。同名がなければ同梱profileを使います。不完全な上書きフォルダから不足ファイルだけを補完することはせず、エラーにします。相対パスは実行時の作業フォルダ基準です。profile名には小文字英数字・`-`・`_`・`.` が使え、先頭は英数字にします。
+`profile_dirs` は設定順に探索し、最初に見つかった同名フォルダを使います。同名がなければ同梱profileを使います。不完全な上書きフォルダから不足ファイルだけを補完することはせず、エラーにします。相対パスは実行時の作業フォルダ基準です。profile名には小文字英数字・`-`・`_`・`.` が使え、先頭は英数字にします。廃止した `auto` は独自profile名としても使用できません。
 
 profileは両段階のリソースを事前検証します。選択したシートとブック要約に指定profileを適用し、選択外シートは作成時のprofile表示を保持します。本文にはシートごとのprofile名を表示し、状態・使用量記録には版とプロンプト/スキーマ/テンプレートのハッシュを保存します。
 
 各段階の3ファイルの変更を再利用判定へ反映します。ブック用ファイルだけを変更してもシート画像の解析は再実行しません。ユーザー定義profileの編集は次回実行から反映されます。同梱リソースを編集した後は `uv tool install . --reinstall` でインストール済みCLIに反映してください。
+
+### 旧言語設定からの移行
+
+2.0.0で `generation.language` と `generation.prompt_profile: auto` / `--profile auto` を廃止しました。旧設定を見つけると修正方法を示すエラーにします。ファイルは自動で書き換えません。
+
+すべてのケースで `generation.language` を削除し、profileを次のように指定します。
+
+| 旧設定 | 移行後の `generation.prompt_profile` |
+| --- | --- |
+| `default-ja` / `default-en` / 独自profileを明示 | そのprofile名を維持 |
+| `auto` またはprofile省略、`language: English` / `en`（大文字・小文字を区別しない） | `default-en` |
+| `auto` またはprofile省略、`language: Japanese` / `ja` またはlanguage省略 | `default-ja` |
+| `auto` またはprofile省略、上記以外のlanguage | 意図した言語のユーザー定義profileを作成して指定 |
+
+たとえば、旧設定 `prompt_profile: auto` と `language: English` は次のように置き換えます。
+
+```yaml
+schema_version: "2.0.0"
+generation:
+  prompt_profile: default-en
+```
+
+読み込む設定ファイルは個別に検証するため、ユーザー共通・作業フォルダ・`--config` の各設定から旧項目を取り除いてください。上位の設定やCLI指定で旧項目のエラーを隠すことはできません。修正後は `tkn-excel-note config show` で有効なprofileを確認できます。
+
+旧 `schema_version: 1` と `"1.0.0"`～`"1.3.0"` は、廃止項目がなければ読み込めます。読み込み結果は `"2.0.0"` に正規化しますが、元ファイルは変更しません。設定を更新する際は `schema_version: "2.0.0"` に揃えてください。
 
 ### 本文構成と旧context
 
