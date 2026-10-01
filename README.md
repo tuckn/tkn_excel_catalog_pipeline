@@ -1,111 +1,299 @@
-# tkn-excel-note — Excel ノートを Markdown にする
+# Tkn Excel Note — Excel ブックを Markdown ノートにする CLI
 
-Excel ブックを、RAG・生成 AI・検索で参照しやすい Frontmatter 付き Markdown にします。
-まず `export` で1つのブック、またはフォルダ配下のブックを書き出せます。
-図形や画像、テキストボックス、矢印など、シート全体を画像化し、その意味を解釈して、文章化します。
+`tkn-excel-note` は、Excel ブック（`.xlsx` / `.xlsm`）を、Frontmatter 付きの Markdown に変換するコマンドラインツールです。
+セルの値や数式に加えて、図形・矢印・テキストボックスで描いたシートも、生成 AI で画像として読み取り、文章で説明できます。
+Obsidian などのノート、全文検索、RAG（検索結果を生成 AI の入力に使う仕組み）から Excel の内容を参照しやすくすることが目的です。
 
-継続的に更新を取り込み、Frontmatter の変更を Excel へ反映する場合は、`source` を設定して `pull` / `push` で同期します。
-Excel が原本です。セル・図形の編集を Markdown から書き戻す機能はありません。
+初めて使う場合は、「[これは何か](#1-これは何か)」から「[1つのブックを Markdown にする](#3-1つのブックを-markdown-にする)」までを順に読んでください。
+フォルダを継続的に同期する場合は、続けて「[フォルダを継続的に同期する](#4-フォルダを継続的に同期する)」を読みます。
+「[コマンド一覧](#5-コマンド一覧)」以降は、必要になったときに参照する内容です。
 
-## インストールする
+## 1. これは何か
 
-Python 3.11 以降と uv を用意し、リポジトリのフォルダで実行します。
+### 1.1. 得られる結果の例
+
+次は、手順書をシート上の図形で描いたブックを、AI の説明付きで書き出した例です。
+内容は架空の説明例で、Frontmatter と本文の一部を省略しています。
+
+```shell
+tkn-excel-note export "C:\path\to\移行手順.xlsx" --context
+```
+
+同じフォルダに `移行手順.xlsx.md` が作成されます。
+
+```markdown
+---
+type: ExcelExport
+title: 移行手順
+author: Example User
+sourceFileName: 移行手順.xlsx
+generatedAt: '2026-10-01T03:00:00.000000+00:00'
+generationMethod: context
+contextStatus: current
+---
+
+# 移行手順
+
+## ブック要約
+
+旧ファイルサーバーから新ストレージへ移行する手順と、切り戻しの判断基準をまとめたブックです。
+「手順」シートの作業順序と、「判定表」シートの判断基準で構成されています。
+
+## シート
+
+### 手順
+
+#### シート要約
+
+移行作業を、事前準備・データ複製・切り替え・確認の4段階に分けたフロー図です。
+複製の検証に失敗した場合は、切り替えに進まず事前準備へ戻る矢印が描かれています。
+
+## Extracted Text
+
+### 手順
+
+- B2: 移行手順
+- 正方形/長方形 3: データ複製（差分同期を2回実施）
+
+## Workbook Map
+
+| Sheet | ID | State | Stored range | Content range | Populated cells | Tables | Shapes | ...
+| --- | --- | --- | --- | --- | ---: | ---: | ---: | ...
+| 手順 | 1 | visible | A1:H40 | B2:G38 | 52 | 0 | 14 | ...
+```
+
+`--context` を付けない場合は、AI を使わずに「Extracted Text」（セル位置付きの値・数式・図形の文字）と「Workbook Map」（シートごとの範囲や図形数の表）だけを書き出します。
+
+### 1.2. 2つの使い方
+
+用途に応じて、次の2つの方法を使い分けます。
+
+| 使い方 | コマンド | 向いている用途 | 出力 |
+| --- | --- | --- | --- |
+| 書き出し | `export` | 1つのブックやフォルダを、その場で Markdown にする | 各ブックの隣の `<ファイル名>.md`（`type: ExcelExport`） |
+| 同期 | `pull` / `push` | 決まったフォルダのブックを、ノートとして継続的に管理する | ノート用フォルダの代理ノート（`type: Excel`） |
+
+書き出しは、実行のたびに新しい Markdown を作ります。
+前回の結果を再利用しないため、`--context` を付けると毎回 AI を呼び出します。
+
+同期では、Excel の更新をノートへ取り込み（`pull`）、ノートの Frontmatter の編集を Excel の文書プロパティへ反映します（`push`）。
+変更のないシートの AI 説明は再利用します。
+どちらの方向でも、Excel が原本です。
+セルや図形の内容を Markdown から Excel へ書き戻すことはできません。
+
+### 1.3. 用語
+
+| 用語 | 意味 |
+| --- | --- |
+| 代理ノート | 同期で作成・更新する Markdown ノートです。1つのブックに1つのノートが対応します。 |
+| source | 入力フォルダと代理ノートの保存先を組にした同期対象です。設定ファイルの `sources.<id>` に定義し、`--source <id>` で選びます。 |
+| 同期記録 | ブックとノートの対応と、前回両者が一致した値を保存したファイル（`sync-state.json`）です。変更の方向を判定するために使います。 |
+| context | AI が生成するシートごとの説明（シート説明）と、ブック全体の説明（ブック要約）です。`--context` を指定したときだけ生成します。 |
+| generator | AI の接続先・文章の profile・補足文の組に名前を付けた設定です。`--generator <id>` で切り替えます。 |
+
+「profile」という語は、選ぶ対象の異なる3つの設定で使われています。
+
+| 種類 | 設定する場所 | 選ぶもの | その実行だけ変える方法 |
+| --- | --- | --- | --- |
+| 文章の profile | `generation.prompt_profile`、または generator の `prompt_profile` | context の構成と言語（既定 `default-ja`、英語は `default-en`） | `--profile <名前>` |
+| Bridge の profile | `generation.bridge_profile`、または generator の `bridge_profile` | AI の接続先・モデル・認証（GenAI Bridge の共有設定に定義） | `--generator <id>` で別の generator を選ぶ |
+| ノートの profile | `sources.<id>.notes.profile` | 代理ノートのテンプレート（既定 `tkn-obsidian-v1`） | なし |
+
+### 1.4. 全体像
+
+長方形は処理、円筒形はデータ、六角形は外部の AI サービスを表します。
+破線は、`--context` を指定したときだけ使う経路です。
+
+```mermaid
+flowchart LR
+    book[("Excel ブック<br/>（原本）")]
+    export["export<br/>書き出す"]
+    exported[("書き出した Markdown<br/>type: ExcelExport")]
+    pull["pull<br/>Excel の更新を取り込む"]
+    note[("代理ノート<br/>type: Excel")]
+    push["push<br/>Frontmatter を反映する"]
+    ai{{"生成 AI<br/>GenAI Bridge 経由"}}
+
+    book --> export --> exported
+    book --> pull --> note
+    note -->|Frontmatter の編集| push
+    push -->|文書プロパティだけを更新| book
+    export -.->|シート画像・抽出文字| ai
+    pull -.->|シート画像・抽出文字| ai
+```
+
+AI の呼び出しは、画像対応モデルへの接続を共通化するライブラリ [GenAI Bridge](https://github.com/tuckn/tkn_genai_bridge)（`tkn_genai_bridge`）を通して行います。
+接続先・モデル・認証は、このツールではなく GenAI Bridge の設定で管理します。
+
+## 2. セットアップ
+
+### 2.1. 前提
+
+使う機能によって、必要な環境が異なります。
+
+| 使う機能 | 必要なもの |
+| --- | --- |
+| AI を使わない書き出し・同期 | Python 3.11 以降、[uv](https://docs.astral.sh/uv/) |
+| `--context`（AI による説明の生成） | 上記に加えて、Windows、デスクトップ版 Microsoft Excel、GenAI Bridge で設定した画像対応の AI 接続先 |
+| `--cover sheet`（シート画像のカバー） | 上記の Python・uv に加えて、Windows、デスクトップ版 Microsoft Excel |
+
+`--context` と `--cover sheet` 以外の処理は、ブックのファイルを直接読み取るため、Excel を起動しません。
+動作確認は Windows で行っています。
+Windows 以外での動作は未検証です。
+
+### 2.2. インストール
+
+ターミナルでリポジトリのフォルダへ移動し、CLI をインストールします。
+依存ライブラリの GenAI Bridge は、インストール時に GitHub から取得します。
 
 ```shell
 cd "C:\path\to\tkn_excel_note"
 uv tool install .
-tkn-excel-note --help
+tkn-excel-note --version
 ```
 
-入力は `.xlsx` / `.xlsm` です。通常の書き出しとメタデータ同期には、Excel の起動や AI 接続は不要です。
-`--context` による説明生成とシート cover の描画には Windows とデスクトップ版 Microsoft Excel が必要です。
-`--context` は GenAI Bridge の画像対応接続先も使用します。[AI 接続の準備](docs/guides/sheet-content.md#準備と実行)を参照してください。
+`tkn-excel-note 3.1.0` のようにバージョンが表示されれば、インストールは完了です。
+コマンドとオプションの一覧は `tkn-excel-note --help`、各コマンドの詳細は `tkn-excel-note export --help` のように確認できます。
 
-> [!IMPORTANT]
-> `--context` は、選択シートの画像・抽出文字や指定した補足文を設定済み AI 接続先へ送信し、費用や利用枠を消費する場合があります。ブック要約の生成では、シート説明なども送信します。
-> 未生成の場合、選択シートごとに 1 回、ブック全体の要約に 1 回呼び出します。`pull --context` では、もしシート内容に変更がなければ、AI呼び出しは行われません。`export --context` は毎回生成します。
-> 既定では表示中の全ワークシートが対象です。1 シートあたりの上限は画像 24 枚、抽出セル・オブジェクト各 10,000 件です。上限超過時はエラーとなり、対象を勝手に切り詰めません。[生成条件と上限](docs/guides/sheet-content.md#使用量と生成設定)を参照してください。
+### 2.3. AI 接続を準備する（`--context` を使う場合）
 
-## 1つの Excel を Markdown にする
+AI を使わない場合、この手順は不要です。
 
-Excel を保存してから実行します。`source` 登録は不要です。
+`--context` は、GenAI Bridge の共有設定 `~/.tkn/genai_bridge/config.yaml` に定義した接続先を使います。
+既定の接続先 `codex-default` は、ログイン済みの Codex CLI を使います。
+ほかの接続先と共有設定の作成方法は、[GenAI Bridge のセットアップ](https://github.com/tuckn/tkn_genai_bridge#セットアップ)を参照してください。
+接続先には、画像入力に対応するモデルを指定します。
 
-```shell
-tkn-excel-note export "C:\My Note\2026-10-01_note.xlsx" --context
-```
+接続先の切り替え方法と、このツール側の設定は「[AI によるシート説明とブック要約](docs/guides/sheet-content.md#準備)」で説明しています。
 
-同じフォルダに `2026-10-01_note.xlsx.md` を生成します。Excel の拡張子を含む元ファイル名に `.md` を付けます。
+## 3. 1つのブックを Markdown にする
 
-- Frontmatter: タイトル・作成者などのメタデータ、原本のパス、保存内容の識別値、生成日時。
-- 本文: シート一覧・構造と、セル位置付きの保存値・数式・読み取れる図形の文字。
-- `--context` 指定時: シートの画像・文字・配置を解析した説明と、それらを統合したブック要約。
+`export` は、設定ファイルを用意せずに使えます。
+Excel で編集中のブックは、先に保存してから実行します。
+保存されていない編集は読み取りません。
 
-AI が不要なら `--context` を省略します。出力先を変える場合は、単体ファイルに `--output` を指定します。
+### 3.1. 最初の書き出し
+
+まず AI を使わずに書き出し、出力を確認します。
 
 ```shell
 tkn-excel-note export "C:\path\to\book.xlsx"
-tkn-excel-note export "C:\path\to\book.xlsx" --output "C:\path\to\context.md" --context
 ```
 
-### フォルダ配下をまとめて書き出す
+ブックと同じフォルダに `book.xlsx.md` が作成されます。
+出力のファイル名は、拡張子を含む元のファイル名に `.md` を付けたものです。
+
+完了すると、標準出力に1行の結果 JSON が表示されます。
+`"status":"success"` と `"exported":1` であれば、書き出しは成功しています。
+作成した Markdown には、次の内容が入ります。
+
+- Frontmatter：タイトル・作成者などの文書プロパティ、元ファイルのパス、元ファイルの内容のハッシュ値（`sourceSnapshotSha256`）、生成日時。
+- Workbook Map：シートごとの使用範囲、値のあるセル数、テーブル・図形・画像・グラフの数。
+- Extracted Text：セル位置付きの保存値、数式、読み取れる図形の文字。数式は再計算しません。
+
+出力先を指定する場合は `--output` を使います。
 
 ```shell
-tkn-excel-note export "C:\My Note" --context
+tkn-excel-note export "C:\path\to\book.xlsx" --output "C:\path\to\notes\book.md"
 ```
 
-サブフォルダを含む全 `.xlsx` / `.xlsm` が対象です。各ブックの隣に `<元ファイル名>.md` を保存します。
-Excel の一時ファイル `~$...` は除外します。フォルダ指定には `--output` を使えません。
-設定ファイルの `sources`、探索パターン、同期ノートの保存先は、このコマンドの対象選択に使いません。
+### 3.2. AI による説明を付ける
 
-### 確認・再生成する
+`--context` を付けると、シートを画像化して AI で解析し、シート説明とブック要約を Markdown に追加します。
+図形や矢印で描いたフロー図など、セルの値だけでは意味が分からないシートで役立ちます。
+
+> [!IMPORTANT]
+> `--context` は、選択したシートの画像・抽出した文字・配置の情報を、設定した AI 接続先へ送信します。
+> `export` では、実行のたびに「選択したシート数 + 1」回（シートごとに1回とブック要約に1回）AI を呼び出し、接続先によっては費用や利用枠を消費します。
+> 送信先と費用の扱いを確認してから実行してください。
+
+最初は `--dry-run` で、入力・設定・出力先を検証します。
+`--dry-run` は Excel の起動、AI の呼び出し、ファイルの保存を行いません。
 
 ```shell
-tkn-excel-note export "C:\My Note" --context --dry-run
+tkn-excel-note export "C:\path\to\book.xlsx" --context --dry-run
+tkn-excel-note export "C:\path\to\book.xlsx" --context
+```
+
+画像化には、デスクトップ版 Excel を裏で起動します。
+ブックの一時コピーを開いて描画するため、元のブックや作業中の Excel は変更しません。
+画像と抽出の根拠データは、Markdown と同じフォルダの `img/` に保存されます。
+Markdown を移動・共有するときは、`img/` も一緒に扱ってください。
+
+既定では、表示中のすべてのワークシートを解析します。
+1シートの画像が24枚、またはセル・オブジェクトがそれぞれ10,000件を超える場合は、対象を切り詰めずにエラーとして停止します。
+上限は設定で変更できます（「[設定リファレンス](docs/reference/configuration.md#ai-生成の設定)」）。
+
+生成した説明には AI の解釈が含まれます。
+小さな文字や矢印の接続先は誤読される場合があるため、重要な箇所は元のシートと見比べてください。
+
+### 3.3. 対象シートと出力言語を選ぶ
+
+`--sheet` で解析するシートを名前で指定できます。
+繰り返し指定でき、非表示のシートも名前を指定すれば解析します。
+シート名は `workbook list-sheets` で確認できます。
+
+```shell
+tkn-excel-note workbook list-sheets --workbook "C:\path\to\book.xlsx"
+tkn-excel-note export "C:\path\to\book.xlsx" --context --sheet "手順" --sheet "判定表"
+```
+
+`--profile` で、説明の構成と言語を選びます。
+既定は日本語の `default-ja` で、英語にする場合は `default-en` を指定します。
+
+```shell
+tkn-excel-note export "C:\path\to\book.xlsx" --context --profile default-en
+```
+
+### 3.4. 補足文を添える
+
+ブックの背景や社内用語など、シートから読み取れない情報を補足文として AI に渡せます。
+`--reference` で文章を直接、`--reference-file` で UTF-8 のファイルを指定します。
+どちらも繰り返し指定でき、併用もできます。
+
+```shell
+tkn-excel-note export "C:\path\to\book.xlsx" --context --reference "移行方式の比較検討メモです。" --reference-file "C:\path\to\background.md"
+```
+
+AI には、Excel の記載を優先し、補足文だけにある事実をブックの記載として書かないよう指示します。
+補足文は、シート説明とブック要約の両方に渡します。
+よく使う補足文は、設定ファイルの generator に保存できます（「[名前付き generator と補足文](docs/reference/configuration.md#名前付き-generator-と補足文)」）。
+
+### 3.5. フォルダをまとめて書き出す
+
+フォルダを指定すると、サブフォルダを含むすべての `.xlsx` / `.xlsm` を書き出します。
+各ブックの隣に `<ファイル名>.md` を作成します。
+Excel の一時ファイル（`~$` で始まるファイル）は対象外です。
+
+```shell
+tkn-excel-note export "C:\path\to\workbooks" --dry-run
+tkn-excel-note export "C:\path\to\workbooks"
+```
+
+フォルダを指定した場合、`--output` は使えません。
+一部のブックで失敗しても、ほかのブックの出力は保存し、失敗したブックを結果 JSON の `results` に `export-error` として報告します。
+
+### 3.6. 書き出し直す
+
+既存の Markdown は、既定では上書きしません。
+同じ出力先に書き出し直す場合は `--force` を指定します。
+
+```shell
 tkn-excel-note export "C:\path\to\book.xlsx" --context --force
 ```
 
-`--dry-run` は入力・設定・出力先を検証するだけで、Excel の画像化・AI 呼び出し・ファイル保存は行いません。
-既存 Markdown は既定で上書きしません。置き換える場合だけ `--force` を指定します。
-ブック単位で全生成が成功してから公開し、失敗した場合や生成中の編集を検出した場合は既存 Markdown を保護します。
-フォルダ処理では成功したブックの出力を残し、失敗したブックを結果に報告します。
+置き換えは、そのブックのすべての生成が成功した後に行います。
+生成に失敗した場合や、処理中にブックか Markdown が変更された場合は、既存の Markdown を残します。
+`--force` で置き換えても、以前の `img/` の画像は削除しません。
 
-`export` は毎回、新しい書き出しを作ります。同期設定・対応関係・同期記録・再利用用キャッシュは保存しません。
-`type: ExcelExport` の出力は `push` の対象になりません。Frontmatter の編集を Excel に反映する場合は、以下の source 同期を使ってください。
-画像と抽出根拠は Markdown の隣の `img/` に保存し、再生成前の画像は残します。AI の使用量記録は `~/.tkn/excel_note/state/export/usage/` に保存します。
+書き出した Markdown（`type: ExcelExport`）は、`push` で Excel へ反映する対象になりません。
+Frontmatter の編集を Excel に反映したい場合は、次の同期を使います。
 
-既定の解析対象は表示中の全ワークシートです。`--sheet` で名前を指定すると非表示シートも選べます。
-未選択シートの文字も抽出しますが、AI 説明には未解析の範囲を表示します。
-`--profile` は文章の構成と言語を選びます。既定は `default-ja`、英語は `default-en`、独自の構成はユーザー定義profileを指定します。
+## 4. フォルダを継続的に同期する
 
-```shell
-tkn-excel-note export "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile default-ja
-```
-
-生成した説明には解釈が含まれます。重要な箇所は元シートと見比べてください。未保存の編集は読み取りません。
-[本文構成・profile・抽出上限](docs/guides/sheet-content.md)も参照してください。
-
-## 補足文を添えて説明を生成する
-
-背景や用語の補足を、直接の文章と UTF-8 ファイルで指定できます。両方を併用でき、繰り返し指定も可能です。
-
-```powershell
-tkn-excel-note export "C:\path\to\book.xlsx" --context `
-  --reference "このブックは移行方式の比較検討メモです。" `
-  --reference-file "C:\path\to\background.md"
-```
-
-Excel の記載を優先し、補足文だけにある事実や結論をブックの記載として扱わないよう指示します。
-補足文はシート説明とブック要約の両方に渡します。`--no-reference` は設定を含むすべての補足を無効にします。
-これらのオプションには `--context` が必要です。
-
-接続先・文章のprofile・共通補足は `generation.generators.<id>` に保存し、`--generator <id>` で選べます。
-source 固有の背景は `sources.<id>.generation.reference` に置けます。
-[設定例と選択順](docs/reference/configuration.md#名前付きgeneratorと補足文)を参照してください。
-
-## 設定したフォルダを継続的に同期する
-
-`source` は、Excel の入力フォルダと代理ノートの保存先を組にした同期対象です。
-1ブックだけのフォルダにも、複数ブックのフォルダにも使えます。
+同期では、設定ファイルに登録した source ごとに、ブックと代理ノートを対応付けて管理します。
+`pull` と `push` は、実行したときに一度だけ処理します。
+フォルダを常に監視する機能はないため、定期的に取り込む場合はタスクスケジューラーなどから `pull` を実行します。
 
 ```mermaid
 flowchart LR
@@ -128,21 +316,23 @@ flowchart LR
     state <-.->|前回一致した値を比較・更新| push
 ```
 
-`pull` / `push` は実行するたびに一度処理します。同期記録を使って変更方向を判定し、競合がある場合は該当ブックへの反映を見送ります。
-`push` は対応する Frontmatter 項目だけを Excel の文書プロパティへ反映し、セル・図形・ノート本文は書き戻しません。
+### 4.1. 設定ファイルを作る
 
-### セットアップ
+設定ファイルのひな形を作成します。
 
 ```shell
 tkn-excel-note config init
-tkn-excel-note config show
 ```
 
-`config init` が表示した設定ファイルを編集します。保存先は `~/.tkn/excel_note/config.yaml` です。
-既存の設定は `--force` を付けない限り置き換えません。
+`~/.tkn/excel_note/config.yaml` が作成され、そのパスが結果 JSON の `configPath` に表示されます。
+内容の異なるファイルが既にある場合は、エラーになり置き換えません。
+
+作成したファイルの `sources` を、自分の入力フォルダとノート保存先に書き換えます。
+ひな形にはサンプルの source `personal-excel` があります。
+次の例では、source の ID を `workbooks` に変えています。
+`sources` 以外の項目はそのまま残します。
 
 ```yaml
-schema_version: "2.1.0"
 sources:
   workbooks:
     workbooks_dir: 'C:\path\to\workbooks'
@@ -153,132 +343,202 @@ sources:
       frontmatter_term_format: plain
 ```
 
-### 一括で更新・反映する
+| 設定キー | 意味 |
+| --- | --- |
+| `workbooks_dir` | 入力ブックのフォルダです。 |
+| `recursive` | `true` でサブフォルダも対象にし、フォルダ構成をノート側にも再現します。 |
+| `include` | 対象にするファイルのパターンです。 |
+| `notes.dir` | 代理ノートを保存するフォルダです。Obsidian の Vault 内のフォルダを指定できます。 |
+| `notes.frontmatter_term_format` | `plain` で `keywords` と `categories` を通常の文字列に、既定の `obsidian-link` で `[[...]]` のリンクにします。 |
+
+Windows のパスは、例のようにシングルクォートで囲みます。
+編集後、読み込まれた設定を確認します。
+
+```shell
+tkn-excel-note config show
+```
+
+ほかの設定キーと、設定ファイルの優先順位は「[設定リファレンス](docs/reference/configuration.md)」を参照してください。
+
+### 4.2. 最初の取り込み
+
+`--dry-run` で、作成される代理ノートを確認してから実行します。
+
+```shell
+tkn-excel-note pull --source workbooks --dry-run
+tkn-excel-note pull --source workbooks
+```
+
+`notes.dir` に、ブックごとの代理ノート `<ファイル名>.md` が作成されます。
+`recursive: true` の場合、入力フォルダの `2026/example.xlsx` は `notes.dir` の `2026/example.xlsx.md` になります。
+代理ノートの Frontmatter には、`noteId`（ノートの識別子）や `sourceFileName`（入力フォルダからの相対パス）など、同期に使う項目が入ります。
+
+結果は画面に表示され、処理ごとのレポートが `~/.tkn/excel_note/state/runs/<run-id>/` に保存されます。
+作成されたノートは `created` と表示されます。
+状態の意味は「[実行結果の読み方](#6-実行結果の読み方)」を参照してください。
+
+AI の説明も生成する場合は、`--context` を付けます。
+送信する情報と呼び出し回数は「[AI による説明を付ける](#32-ai-による説明を付ける)」と同じです。
 
 ```shell
 tkn-excel-note pull --source workbooks --context --dry-run
 tkn-excel-note pull --source workbooks --context
-tkn-excel-note push --source workbooks --dry-run
-tkn-excel-note push --source workbooks
-tkn-excel-note status --source workbooks
 ```
 
-AI が不要な更新では `--context` を省略します。
-設定した source に対する処理は `--source ID` が必須です。省略時は引数エラーとなり、全 source を暗黙に処理しません。
-ブックやノートのパスを位置引数にする `pull` / `push` は提供しません。
-反映するノートを絞る場合は `push --source workbooks --note "book.xlsx.md"` とします。
+`--source` は必須です。
+複数の source を登録している場合も、1回の実行では1つの source だけを処理します。
 
-同期ノートは `type: Excel` と識別子を持ち、前回一致した値を使って変更方向を判定します。
-`export` の Markdown を自動で同期へ登録しません。同期ノートは別の保存先から始めてください。
-各コマンドは呼び出したときに一度処理します。通常の同期で Excel や代理ノートを削除することはありません。
+### 4.3. Excel の更新を取り込む
 
-## Excel の更新をノートへ取り込む
-
-Excel を保存した後、同じコマンドを実行します。
+Excel を保存した後、同じ `pull` を実行します。
 
 ```shell
 tkn-excel-note pull --source workbooks --context
 ```
 
-内容・生成条件・補足文が変わっていないシートの説明と画像は再利用します。
-補足ファイルはパスだけでなく内容で変更を判定します。
-ブック全体の説明も、材料となるシート説明や生成条件が同じなら再利用します。
-初回の AI 呼び出しは選択シート数 + 1 回、全結果を再利用できる場合は 0 回です。
+`--context` を付けた `pull` は、変更のないシートの説明を再利用し、変更されたシートだけを AI で解析し直します。
+すべての説明を再利用できる場合、AI の呼び出しは0回です。
+補足文の内容や文章の profile を変えた場合は、該当するシートとブック要約を生成し直します。
 
-`--context` なしで更新すると、AI の説明は保持します。
-Excel の内容が説明生成時から変わっていれば Frontmatter の `contextStatus` を `stale` にして、再生成が必要だと示します。
-`current` は保存済み Excel と生成記録が対応している状態で、人が正確さを確認したという意味ではありません。
+`--context` を付けずに `pull` を実行すると、既存の説明はそのまま残します。
+説明の生成後に Excel の内容が変わっていれば、Frontmatter の `contextStatus` を `stale` にして、説明が古いことを示します。
 
-未知の Frontmatter 項目と、管理マーカー外の手書き本文は保持します。
-生成部分を手直ししている場合、`--context` は上書きを止めます。
-意図して生成し直す場合だけ `--context --force` を使います。[範囲・保護・状態の詳細](docs/guides/sheet-content.md)を参照してください。
+| `contextStatus` | 意味 |
+| --- | --- |
+| `not-generated` | 説明をまだ生成していません。 |
+| `current` | すべてのシートの説明が、保存済みの Excel と対応しています。人が内容を確認したという意味ではありません。 |
+| `partial` | 説明を生成していないシートがあります。 |
+| `stale` | 説明の生成後に Excel の内容が変わりました。`--context` を付けて `pull` すると更新します。 |
+| `unverified` | 手直しされた説明などがあり、Excel との対応を確認できません。 |
 
-## Frontmatter の変更を Excel に反映する
+代理ノートの本文のうち、ツールが管理する範囲は `<!-- excel-catalog:begin ... -->` と `<!-- excel-catalog:end ... -->` のマーカーで囲まれています。
+マーカーの外に書いた文章と、ツールが知らない Frontmatter 項目は保持します。
+マーカー内の説明を手直しした場合、`--context` はその説明を上書きせずに停止します。
+意図して生成し直す場合だけ `--context --force` を指定します。
 
-ノートの `title`、`subject`、`author`、`keywords`、`categories`、`comments` を編集し、反映します。
+### 4.4. Frontmatter の変更を Excel に反映する
+
+代理ノートの次の項目を編集すると、Excel の文書プロパティへ反映できます。
+
+| 代理ノートの項目 | Excel の文書プロパティ |
+| --- | --- |
+| `title` | タイトル |
+| `subject` | 件名 |
+| `author` | 作成者 |
+| `keywords` | キーワード |
+| `categories` | 分類 |
+| `comments` | コメント |
 
 ```shell
-tkn-excel-note push --source workbooks --note "book.xlsx.md" --dry-run
-tkn-excel-note push --source workbooks --note "book.xlsx.md"
+tkn-excel-note push --source workbooks --dry-run
+tkn-excel-note push --source workbooks
 ```
 
-Excel をバックアップしてから文書プロパティを更新します。
-`description`、AI の説明、手書き本文は Excel へ書き戻しません。セルや図形の編集も対象外です。
-`push` でノートの本文が短縮・再生成されることはありません。
+特定のノートだけを反映する場合は、`--note "book.xlsx.md"` のようにノート名を指定します。
 
-Excel とノートで同じ項目を別々の値に変えた場合は、競合として報告します。
-前回一致した値を使って変更方向を判定するため、同期記録も継続して保管します。
-[項目の対応と競合の解決](docs/reference/synchronization.md)を参照してください。
+`push` は、ブックをバックアップしてから文書プロパティだけを書き換え、書き込み後に内容を検証します。
+セル、図形、AI の説明、ノートの本文は Excel へ書き戻しません。
+バックアップは `~/.tkn/excel_note/state/backups/` に保存されます。
 
-## シート画像を cover にする
+Excel とノートで同じ項目を別々の値に変えていた場合、そのブックへの反映を見送り、`conflict` として報告します。
+どちらの値を採用するかを指定して解決する方法は、「[競合の判定と解決](docs/reference/synchronization.md#競合の判定と解決)」を参照してください。
 
-埋め込みサムネイルがない、または表示範囲が狭い場合は、保存済みシートの指定範囲から cover を作れます。AI 接続は不要です。
+### 4.5. カード表示用の画像（cover）を作る
+
+`pull` は、Frontmatter の `cover` に、ブックの画像へのリンクを設定します。
+Obsidian Bases のカードビューで、この画像をサムネイルとして表示できます。
+
+既定では、Excel が保存時に埋め込んだサムネイル画像を使います。
+サムネイルがないブックや、特定の範囲を表示したい場合は、シートの指定範囲を画像化できます。
+この画像化は Excel を使いますが、AI は使いません。
 
 ```shell
-tkn-excel-note pull --source workbooks --cover sheet
-tkn-excel-note pull --source workbooks --cover sheet --cover-sheet "概要" --cover-range "A1:Q50" --cover-width 2400
+tkn-excel-note pull --source workbooks --cover sheet --cover-range "A1:Q50"
 ```
 
-初回の既定値は先頭の表示ワークシート、`A1:Q50`、幅 2400 px の PNG です。範囲を1枚に収め、用紙の余白を取り除きます。
-`--context` とも併用できます。cover 自体は AI に送信しません。
-成功した生成方式・範囲・画像幅をブックごとに記録するため、次回の `pull` はオプションを省略しても同じ条件を使います。
-変更がなく画像も正常なら Excel を起動せず再利用し、ブックや条件が変わったとき、画像が欠損・破損したときに再生成します。
+一度成功した条件はブックごとに記録され、次回からはオプションを省略しても同じ条件で更新します。
+手動で設定した `cover` は上書きしません。
+設定方法とカードビューの例は、「[代理ノートの管理](docs/guides/catalog-operations.md)」を参照してください。
 
-設定ファイルのトップレベルに `cover: {mode: sheet}` を追加すると、選択したブックに常時適用できます。
-事前確認は `--cover sheet --dry-run`、埋め込み方式への切り替えは `--cover embedded` です。
-手動設定した cover は保持し、画像化に失敗した場合も既存の cover を残してメタデータ同期を続けます。
-[詳しい仕様と注意点](docs/guides/catalog-operations.md#シートの指定範囲から-cover-を作る)を参照してください。
+### 4.6. 失敗した後に再実行する
 
-## シート構造を確認する
+一部のブックで失敗しても、ほかのブックの処理結果は残ります。
+原因を解消した後、同じコマンドを再実行してください。
+`pull --context` は、完了したシートの説明を再利用して、残りから続けます。
 
-通常の `pull` は、保存済みの Excel からシート別の事実を取得し、
-既存の `Workbook Map` を表に更新します。この構造取得には Excel 起動・画像化・AI 呼び出しは不要です。
-シート cover の更新が必要な場合は、その画像生成のために Excel を起動します。
-`--dry-run` は読み取りだけで、ノートや同期状態を保存しません。
-既存のシート説明（`context-*`）や管理領域外の本文は保持します。
+ブックを移動・名前変更した場合や、元のブックを削除した場合の扱いは、「[同期の仕様](docs/reference/synchronization.md#名前変更と移動)」と「[元ブックがない代理ノートを削除する](docs/guides/catalog-operations.md#元ブックがない代理ノートを削除する)」を参照してください。
+通常の同期で、ブックや代理ノートを削除することはありません。
 
-| 項目 | 意味 |
+## 5. コマンド一覧
+
+| 目的 | コマンド | 詳細 |
+| --- | --- | --- |
+| ブックまたはフォルダを Markdown に書き出す | `export <ファイルまたはフォルダ> [--context]` | [1つのブックを Markdown にする](#3-1つのブックを-markdown-にする) |
+| 設定ファイルを作成・確認する | `config init` / `config show` | [設定リファレンス](docs/reference/configuration.md) |
+| Excel の更新を代理ノートへ取り込む | `pull --source <id> [--context]` | [最初の取り込み](#42-最初の取り込み) |
+| Frontmatter の編集を Excel へ反映する | `push --source <id> [--note <ノート>]` | [Frontmatter の変更を Excel に反映する](#44-frontmatter-の変更を-excel-に反映する) |
+| 同期の状況を確認する（変更なし） | `status --source <id>` | [同期の仕様](docs/reference/synchronization.md#状態と次の操作) |
+| 保存済みブックのシート名を一覧する | `workbook list-sheets --workbook <パス>` | [対象シートと出力言語を選ぶ](#33-対象シートと出力言語を選ぶ) |
+| ブックに移動を追跡するための固定 ID を付ける | `adopt --source <id>` | [名前変更と移動](docs/reference/synchronization.md#名前変更と移動) |
+| 元ブックがない代理ノートを削除する | `delete-notes --source <id> --note <ノート>` | [代理ノートの管理](docs/guides/catalog-operations.md#元ブックがない代理ノートを削除する) |
+
+書き込みを伴うコマンド（`export`、`pull`、`push`、`adopt`、`delete-notes`）は、`--dry-run` で変更予定だけを確認できます。
+次のオプションは、サブコマンドより前に指定します。
+
+| オプション | 動作 |
 | --- | --- |
-| Stored range | 保存された worksheet dimension。書式だけのセルを含む場合があります。未記録なら unknown。 |
-| Content range | 値または数式のあるセルを囲む最小の矩形。空白だけの文字列も値として扱います。 |
-| Populated cells | 値または数式のあるセル数。0・FALSE・結果未保存の数式も対象。書式だけのセルは除外。 |
-| Tables | Excel で定義されたテーブル数。見た目の表は判定しません。 |
-| Shapes | 通常の図形・コネクタ数。グループの容器は数えず、内部の要素を個別に数えます。 |
-| Images / Charts | シート上の配置数。同じ画像の複数配置も別々に数えます。 |
-| Notes | 取得失敗・未対応項目の理由。 |
+| `--config <パス>` | 指定した設定ファイルを、ほかの設定ファイルより優先して読み込みます。 |
+| `-v` / `--verbose` | 比較した値や変更予定の方向などの詳細を表示します。 |
+| `-q` / `--quiet` | 情報ログを表示しません。 |
+| `--no-color` | ログを色なしで表示します。 |
+| `--report-dir <パス>` | 実行レポートの保存先を変更します。 |
 
-集計は非表示シートも対象で、文字抽出の上限 `sync.max_extracted_text_chars` や
-AI 用の `generation.max_cells` には左右されません。広いセル範囲の面積をセル数にはしません。
-既知の空は `0`、空の存在範囲は `—`、不明・未対応は `unknown` として区別します。
-VML、OLE、コントロール、拡張オブジェクトなどを検出した場合は、部分的な個数を総数と誤認しないよう
-図形・画像・グラフ数を unknown とします。チャートシートなど worksheet 以外も未対応として記録します。
-数式の再計算や、保存後の未保存編集の取得は行いません。
+## 6. 実行結果の読み方
 
-同じ結果を同期状態 `~/.tkn/excel_note/state/sync-state.json` の各 entry の
-`sheetInventory` に保存します。`schemaVersion: 1` と `sheets` 配列を持ち、
-各シートには `name`・`sheetId`・`state`・パッケージ内の `path`、
-`stored_range`・`content_range`・`populated_cells`・`tables`・`shapes`・`images`・`charts`・
-`warnings` を記録します。不明値は JSON の `null`、既知の空の存在範囲は空文字列です。
-VLM の対象選択に利用するための基礎情報であり、今回の追加で AI の対象選択・呼び出し条件は変わりません。
+処理の進捗は標準エラー出力に、処理結果は標準出力に1行の JSON で出力します。
+スクリプトから利用する場合は、標準出力の JSON と終了コードで結果を判定できます。
 
-## コマンドと結果
-
-| 目的 | コマンド |
+| 終了コード | 意味 |
 | --- | --- |
-| 単体・フォルダの独立した Markdown 書き出し | `export <file-or-folder> [--context]` |
-| 設定済み source の代理ノートを作成・更新 | `pull --source ID [--context]` |
-| source 内のメタデータを Excel に反映 | `push --source ID [--note ...]` |
-| source の追跡状況を確認 | `status --source ID` |
-| 保存済みブックのシート一覧 | `workbook list-sheets --workbook book.xlsx` |
-| 設定の作成・確認 | `config init` / `config show` |
-| 固定 ID を Excel に付与 | `adopt --source ID` |
-| 元ブックのない代理ノートをバックアップして削除 | `delete-notes --source ID --note ...` |
+| `0` | 成功しました。`rename-required` などの確認が必要な状態が残る場合もあるため、結果 JSON の `statusCounts` も確認します。 |
+| `1` | 一部またはすべての対象で、読み取り・生成・書き込みに失敗しました。 |
+| `2` | 未解決の競合があります。コマンドの引数に誤りがある場合も `2` になります。 |
+| `3` | 設定ファイルや対象の指定に誤りがあります。 |
 
-進捗は標準エラー出力、処理結果は標準出力の1行 JSONです。
-`export` は同期レポートを保存しません。同期コマンドは通常実行でレポートを保存します。
-オプションは各コマンドの `--help`、[状態と終了コード](docs/reference/synchronization.md#状態と次の操作)を参照してください。
+`status` と、`--dry-run` を付けない同期コマンドは、実行レポートを `~/.tkn/excel_note/state/runs/<run-id>/` に保存します。
+ファイルごとの結果は `actions.csv`、項目ごとの比較は `differences.csv` で確認できます。
+`export` はレポートを保存しません。
+状態の一覧と対応方法は「[状態と次の操作](docs/reference/synchronization.md#状態と次の操作)」を参照してください。
 
-## 旧版から更新する
+## 7. 保存場所
+
+| 保存場所 | 内容 | 失った場合の影響 |
+| --- | --- | --- |
+| `~/.tkn/excel_note/config.yaml` | 設定ファイル | 入力フォルダと保存先の指定を作り直す必要があります。 |
+| `notes.dir`（source ごと） | 代理ノートと、その `img/` の画像 | 手書きの本文と生成済みの説明を失います。ブックからは復元できません。 |
+| `~/.tkn/excel_note/state/sync-state.json` | 同期記録 | 既存の差分が競合として扱われることがあります。 |
+| `~/.tkn/excel_note/state/backups/` | `push` などで書き換える前のブック、削除前のノート | 過去の状態に戻せなくなります。 |
+| `~/.tkn/excel_note/state/context/` | 説明の再利用・保護の記録と AI の使用量 | 説明を再利用できなくなります。手直しの有無を確認できないため、既存の説明の置き換えが止まる場合があります。 |
+| `~/.tkn/excel_note/state/runs/` | 実行レポート | 過去の実行を調べられなくなります。 |
+| `~/.tkn/excel_note/state/export/usage/` | `export --context` の AI 使用量 | 使用量の記録を失います。書き出し結果には影響しません。 |
+
+別の PC へ移す場合は、ブック、代理ノートと画像、`~/.tkn/excel_note/` を一緒に移します。
+ノートとレポートには、元ファイルのパスや抽出した本文が含まれます。
+公開するリポジトリなどに含めないよう注意してください。
+
+## 8. 対応範囲と制限
+
+- 入力は `.xlsx` と `.xlsm` です。旧形式の `.xls` は、同梱のスクリプトで変換してから使います（「[旧 `.xls` を変換する](docs/guides/catalog-operations.md#旧-xls-を変換する)」）。
+- 保存済みの内容だけを読み取ります。Excel で開いたまま保存していない編集は対象外です。
+- 数式は再計算せず、保存されている値を使います。
+- チャートシートなど、ワークシート以外のシートは内容を抽出せず、未対応として記録します。
+- Excel へ書き戻せるのは、[Frontmatter の変更を Excel に反映する](#44-frontmatter-の変更を-excel-に反映する)で示した文書プロパティだけです。
+- デジタル署名付きのブックへの書き込みは拒否します。
+- AI の説明は解釈を含みます。`contextStatus: current` は、説明と Excel の対応を示すもので、内容の正確さを保証しません。
+
+## 9. 更新・移行
+
+リポジトリを更新した後は、CLI を再インストールします。
 
 ```shell
 cd "C:\path\to\tkn_excel_note"
@@ -286,29 +546,34 @@ uv tool install . --reinstall
 tkn-excel-note --version
 ```
 
-製品・配布名を `tkn-excel-note`、リポジトリ名を `tkn_excel_note` に変更しました。
-3.1.0では名前付きgeneratorと補足文を追加しました。旧 `generation.bridge_profile` / `prompt_profile` / `overrides` は引き続き使え、設定ファイルを自動変更しません。更新後は `uv tool install . --reinstall` でインストール済みCLIを更新してください。
+古い設定ファイルはそのまま読み込めます。
+読み込み時に新しい形式として解釈し、ファイル自体は書き換えません。
+廃止された設定が残っている場合は、修正方法を示すエラーになります。
 
-3.0.0では、単体・フォルダの書き出しを `export` に分離しました。旧単体 `pull <workbook>` は `export <workbook>` へ変更してください。
-同期は設定済み source を対象にし、`pull` / `push` / `status` / `adopt` / `delete-notes` に `--source ID` が必須です。`--all-sources` は廃止しました。旧 `context build` の別名は提供しません。
-新 CLI の動作確認後、旧ツール環境があれば削除できます。
+旧バージョンから更新する場合は、該当する項目を確認してください。
 
-```shell
-uv tool uninstall tkn-excel-catalog-pipeline
-```
+| 該当する場合 | 必要な対応 |
+| --- | --- |
+| 2.x で `pull <ブック>` を使っていた | `export <ブック>` に置き換えます。同期の `pull` / `push` は source の設定と `--source <id>` が必要です。 |
+| `--all-sources` を使っていた | source ごとに `--source <id>` を指定して実行します。 |
+| `generation.language` や `--profile auto` を設定していた | 文章の profile を指定します。対応表は「[旧言語設定からの移行](docs/guides/sheet-content.md#旧言語設定からの移行)」にあります。 |
+| 旧名 `tkn-excel-catalog-pipeline` をインストールしていた | 新しい CLI の動作を確認してから、`uv tool uninstall tkn-excel-catalog-pipeline` で削除します。 |
+| 旧保存領域 `~/.tkn/excel_catalog_pipeline/` を使っていた | 下記の手順でフォルダを移します。 |
 
-保存領域は `~/.tkn/excel_note/` に統一しています。旧 `~/.tkn/excel_catalog_pipeline/` を使っていた場合は、CLI を停止し、移行先が存在しないことを確認してフォルダ全体を `excel_note` へ名前変更してください。設定・同期記録・生成履歴・バックアップをまとめて引き継ぎます。両方のフォルダがある場合は自動で統合せず、内容を確認してください。
-ノートの識別子、管理マーカー、Excel の固定 ID も維持するため、既存ノートを作り直す必要はありません。
-既存のシート説明はブック要約の材料として保持します。選択した生成済みシートは新しいprofileで再生成します。取り込み済みの説明は保持し、記録と本文が一致する旧形式のブロックだけ見出しを整えます。旧contextのシート要約は、明示的に再生成するまで追加しません。
-旧 `export` の同期情報を持たない Markdown は、独立した書き出しとして残ります。新ノートは別の保存先で作成してください。
+旧保存領域を使っていた場合は、CLI を実行していない状態で、`~/.tkn/excel_catalog_pipeline/` フォルダ全体を `~/.tkn/excel_note/` に名前変更します。
+設定、同期記録、説明の生成記録、バックアップがまとめて引き継がれます。
+既に `~/.tkn/excel_note/` がある場合は、自動では統合しません。
+両方の内容を確認してから、どちらを使うか決めてください。
 
-## 詳しい情報と開発
+ノートの識別子、管理マーカー、ブックの固定 ID は変わらないため、既存の代理ノートを作り直す必要はありません。
+過去に `export` で書き出した Markdown は、同期の対象にはなりません。
+同期を始める場合は、別のフォルダを `notes.dir` に指定してください。
 
-- [AI による説明の生成](docs/guides/sheet-content.md): 接続設定、解析範囲、画像、再利用、状態。
-- [設定リファレンス](docs/reference/configuration.md): 入出力先、探索範囲、設定の優先順位。
-- [同期と実行結果](docs/reference/synchronization.md): Frontmatter、競合、名前変更、保存領域。
-- [代理ノートの管理](docs/guides/catalog-operations.md): サムネイル、明示的な削除と復旧、旧 `.xls` の変換。
-- [変更履歴](CHANGELOG.md)、[利用許諾](LICENSE)。
+バージョンごとの変更内容は [CHANGELOG.md](CHANGELOG.md) を参照してください。
+
+## 10. 開発と検証
+
+開発用の依存関係をインストールし、テストと静的検査を実行します。
 
 ```shell
 uv sync --locked
@@ -318,7 +583,8 @@ uv run mypy src
 uv build
 ```
 
-シート cover の実機回帰テストは、Windows とデスクトップ版 Excel がある環境で明示的に実行します。架空データのブックだけを作成し、非表示の専用 Excel インスタンスを使います。
+シート画像を使う機能の実機テストは、Windows とデスクトップ版 Excel がある環境で、環境変数を設定したときだけ実行されます。
+テストは架空データのブックを作成し、非表示の専用 Excel インスタンスで描画します。
 
 ```powershell
 $env:TKN_EXCEL_NOTE_NATIVE_TESTS = '1'
@@ -326,8 +592,31 @@ uv run pytest tests/test_sheet_cover_native.py
 Remove-Item Env:TKN_EXCEL_NOTE_NATIVE_TESTS
 ```
 
-内部 Python パッケージ名は既存の `excel_catalog_pipeline` を維持しています。
-[CLI](src/excel_catalog_pipeline/cli.py)、[独立した書き出し](src/excel_catalog_pipeline/export.py)、[同期処理](src/excel_catalog_pipeline/pipeline.py)、[AI 統合](src/excel_catalog_pipeline/ai_pull.py)、[生成処理](src/excel_catalog_pipeline/context.py)が実装の入口です。
-[ノートテンプレート](src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md)と[context profile](src/excel_catalog_pipeline/context_profiles/)のプロンプト・出力スキーマ・テンプレートをパッケージに同梱します。
-コード編集をインストール環境へ直接反映する開発用途では `uv tool install -e . --reinstall` も使えます。
-依存・メタデータ・リソース変更後は再インストールします。テストと設定例には架空データだけを使います。
+コードの変更をインストール済みの CLI へすぐに反映する場合は、`uv tool install -e . --reinstall` で編集可能モードでインストールします。
+依存関係、パッケージのメタデータ、同梱リソースを変更した場合は、再インストールが必要です。
+テストと設定例には、架空のデータだけを使います。
+
+Python パッケージ名は `excel_catalog_pipeline` です。
+主な実装の入口は次のとおりです。
+
+| ファイル | 担当 |
+| --- | --- |
+| [cli.py](src/excel_catalog_pipeline/cli.py) | コマンドと引数の定義 |
+| [export.py](src/excel_catalog_pipeline/export.py) | `export` の書き出し |
+| [pipeline.py](src/excel_catalog_pipeline/pipeline.py) | `pull` / `push` などの同期処理 |
+| [ai_pull.py](src/excel_catalog_pipeline/ai_pull.py) | 同期と AI 生成の統合 |
+| [context.py](src/excel_catalog_pipeline/context.py) | シートの画像化と説明の生成 |
+| [note_profiles/](src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md) | 代理ノートのテンプレート |
+| [context_profiles/](src/excel_catalog_pipeline/context_profiles/) | 文章の profile（プロンプト・出力スキーマ・テンプレート） |
+
+## 11. 関連ドキュメント
+
+| 文書 | 読む目的 |
+| --- | --- |
+| [AI によるシート説明とブック要約](docs/guides/sheet-content.md) | AI 接続の準備、説明の再利用と保護、独自の文章 profile の作成 |
+| [代理ノートの管理](docs/guides/catalog-operations.md) | cover 画像の設定、元ブックがないノートの削除、`.xls` の変換 |
+| [設定リファレンス](docs/reference/configuration.md) | すべての設定キー、既定値、設定ファイルの優先順位 |
+| [同期の仕様](docs/reference/synchronization.md) | 項目の対応、競合の解決、名前変更、状態と終了コード、レポート |
+| [ノートの形式](docs/reference/note-format.md) | Frontmatter の項目、本文の構成、Workbook Map の各列の意味 |
+| [変更履歴](CHANGELOG.md) | バージョンごとの変更点 |
+| [ライセンス](LICENSE) | 利用許諾 |
