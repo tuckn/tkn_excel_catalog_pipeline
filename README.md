@@ -34,6 +34,12 @@ contextStatus: current
 
 # 移行手順
 
+## Workbook Map
+
+| Sheet | ID | State | Stored range | Content range | Populated cells | Tables | Shapes | ...
+| --- | --- | --- | --- | --- | ---: | ---: | ---: | ...
+| 手順 | 1 | visible | A1:H40 | B2:G38 | 52 | 0 | 14 | ...
+
 ## ブック要約
 
 旧ファイルサーバーから新ストレージへ移行する手順と、切り戻しの判断基準をまとめたブックです。
@@ -48,21 +54,14 @@ contextStatus: current
 移行作業を、事前準備・データ複製・切り替え・確認の4段階に分けたフロー図です。
 複製の検証に失敗した場合は、切り替えに進まず事前準備へ戻る矢印が描かれています。
 
-## Extracted Text
-
-### 手順
+#### Extracted Text
 
 - B2: 移行手順
 - 正方形/長方形 3: データ複製（差分同期を2回実施）
 
-## Workbook Map
-
-| Sheet | ID | State | Stored range | Content range | Populated cells | Tables | Shapes | ...
-| --- | --- | --- | --- | --- | ---: | ---: | ---: | ...
-| 手順 | 1 | visible | A1:H40 | B2:G38 | 52 | 0 | 14 | ...
 ```
 
-`--context` を付けない場合は、AI を使わずに「Extracted Text」（セル位置付きの値・数式・図形の文字）と「Workbook Map」（シートごとの範囲や図形数の表）だけを書き出します。
+`--context` を付けない場合は、AI を使わずに各シート内の「Extracted Text」（セル位置付きの値・数式・図形の文字）と「Workbook Map」（シートごとの範囲や図形数の表）だけを書き出します。
 
 ### 1.2. 2つの使い方
 
@@ -385,8 +384,15 @@ tkn-excel-note pull --source workbooks --context --dry-run
 tkn-excel-note pull --source workbooks --context
 ```
 
-`--source` は必須です。
-複数の source を登録している場合も、1回の実行では1つの source だけを処理します。
+`pull` は `--source <id>` または `--all-sources` のどちらかを指定します。併用はできません。
+登録済みのすべての source をまとめて取り込む場合は、次のように実行します。
+`--context` や cover のオプションも組み合わせられます。
+
+```shell
+tkn-excel-note pull --all-sources --dry-run
+tkn-excel-note pull --all-sources
+tkn-excel-note pull --all-sources --context
+```
 
 ### 4.3. Excel の更新を取り込む
 
@@ -475,7 +481,7 @@ tkn-excel-note pull --source workbooks --cover sheet --cover-range "A1:Q50"
 | --- | --- | --- |
 | ブックまたはフォルダを Markdown に書き出す | `export <ファイルまたはフォルダ> [--context]` | [1つのブックを Markdown にする](#3-1つのブックを-markdown-にする) |
 | 設定ファイルを作成・確認する | `config init` / `config show` | [設定リファレンス](docs/reference/configuration.md) |
-| Excel の更新を代理ノートへ取り込む | `pull --source <id> [--context]` | [最初の取り込み](#42-最初の取り込み) |
+| Excel の更新を代理ノートへ取り込む | `pull (--source <id> または --all-sources) [--context]` | [最初の取り込み](#42-最初の取り込み) |
 | Frontmatter の編集を Excel へ反映する | `push --source <id> [--note <ノート>]` | [Frontmatter の変更を Excel に反映する](#44-frontmatter-の変更を-excel-に反映する) |
 | 同期の状況を確認する（変更なし） | `status --source <id>` | [同期の仕様](docs/reference/synchronization.md#状態と次の操作) |
 | 保存済みブックのシート名を一覧する | `workbook list-sheets --workbook <パス>` | [対象シートと出力言語を選ぶ](#33-対象シートと出力言語を選ぶ) |
@@ -554,8 +560,8 @@ tkn-excel-note --version
 
 | 該当する場合 | 必要な対応 |
 | --- | --- |
-| 2.x で `pull <ブック>` を使っていた | `export <ブック>` に置き換えます。同期の `pull` / `push` は source の設定と `--source <id>` が必要です。 |
-| `--all-sources` を使っていた | source ごとに `--source <id>` を指定して実行します。 |
+| 2.x で `pull <ブック>` を使っていた | `export <ブック>` に置き換えます。同期は source の設定が必要です。`pull` は `--source <id>` または `--all-sources`、`push` は `--source <id>` を指定します。 |
+| `pull --all-sources` を使っていた | 3.2.1 で復元しました。そのまま使えます。 |
 | `generation.language` や `--profile auto` を設定していた | 文章の profile を指定します。対応表は「[旧言語設定からの移行](docs/guides/sheet-content.md#旧言語設定からの移行)」にあります。 |
 | 旧名 `tkn-excel-catalog-pipeline` をインストールしていた | 新しい CLI の動作を確認してから、`uv tool uninstall tkn-excel-catalog-pipeline` で削除します。 |
 | 旧保存領域 `~/.tkn/excel_catalog_pipeline/` を使っていた | 下記の手順でフォルダを移します。 |

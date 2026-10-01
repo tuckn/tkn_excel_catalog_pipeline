@@ -29,8 +29,6 @@ contextStatus: {{ context_status }}
 {{ workbook_map }}
 <!-- excel-catalog:end workbook-map -->
 
-<!-- excel-catalog:begin extracted-text -->
-## Extracted Text
-
-{{ extracted_text }}
-<!-- excel-catalog:end extracted-text -->
+<!-- excel-catalog:begin sheet-contexts -->
+## シート
+<!-- excel-catalog:end sheet-contexts -->

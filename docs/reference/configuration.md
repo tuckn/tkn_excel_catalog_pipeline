@@ -34,7 +34,8 @@ tkn-excel-note config show
 | `pull` | `sources`、`sync`、`cover`。`--context` を付けた場合は `generation` も使います。 |
 | `push`、`status`、`adopt`、`delete-notes` | `sources` |
 
-`pull`、`push`、`status`、`adopt`、`delete-notes` には `--source <id>` が必須です。
+`pull` は `--source <id>` または `--all-sources` のどちらかが必須です。`--all-sources` は登録済みのすべての source を処理します。
+`push`、`status`、`adopt`、`delete-notes` には `--source <id>` が必須です。
 
 ## source の設定
 

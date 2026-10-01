@@ -149,7 +149,7 @@ def test_packaged_note_profile_owns_markdown_structure(tmp_path: Path) -> None:
     assert tuple(note.frontmatter) == template.frontmatter_fields
     assert template.managed_names == (
         "workbook-map",
-        "extracted-text",
+        "sheet-contexts",
     )
     assert note.frontmatter["author"] == "Example author"
     assert note.frontmatter["sourceCreated"] == "2025-12-01T00:00:00Z"

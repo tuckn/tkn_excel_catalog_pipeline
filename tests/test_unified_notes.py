@@ -25,7 +25,9 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "app_root", lambda: tmp_path / "application")
     book = create_workbook(tmp_path / "books" / "nested" / "book.xlsx")
     output = tmp_path / "notes" / "book.xlsx.md"
-    source = SourceConfig("library", book.parent, ("*.xlsx", "*.xlsm"), output.parent, frontmatter_term_format="plain")
+    source = SourceConfig(
+        "library", book.parent, ("*.xlsx", "*.xlsm"), output.parent, frontmatter_term_format="plain"
+    )
     config = AppConfig("2.0.0", (source,), SyncConfig())
     monkeypatch.setattr(cli, "load_config", lambda **kwargs: config)
     monkeypatch.setattr(context, "resolve_profile", lambda config: Profile())
@@ -354,14 +356,14 @@ def test_separate_sheet_pulls_accumulate_context_and_use_workbook_order(setup):
     assert [item["sheet"] for item in calls[-1][1]["notes"]] == ["Data", "Second"]
     assert context.existing_block(output.read_text(encoding="utf-8"), "2") == second
     headings = [line for line in note.body.splitlines() if line.startswith(("# ", "## ", "### "))]
-    assert headings[:5] == [
+    assert headings == [
         "# Example title",
+        "## Workbook Map",
         "## ブック要約",
         "## シート",
         "### Data",
         "### Second",
     ]
-    assert headings[-1] == "## Workbook Map"
     assert book.read_bytes() == before
     assert [stage for stage, _ in calls] == ["sheet", "workbook", "sheet", "workbook"]
     unchanged = output.read_bytes()
@@ -369,7 +371,7 @@ def test_separate_sheet_pulls_accumulate_context_and_use_workbook_order(setup):
     assert output.read_bytes() == unchanged and len(calls) == 4
     assert pull(book) == 0
     assert "## シート" in read_note(output).body
-    assert read_note(output).body.index("context-2") < read_note(output).body.index("workbook-map")
+    assert read_note(output).body.index("workbook-map") < read_note(output).body.index("context-2")
 
 
 def test_unselected_changed_sheet_is_included_as_stale_without_regeneration(setup):
@@ -494,3 +496,26 @@ def test_custom_templates_invalidate_only_the_relevant_generation_stage(
     before = output.read_bytes()
     assert pull(book, None, "--context", "--dry-run") == 0
     assert output.read_bytes() == before and len(calls) == 5
+
+
+def test_plain_refresh_keeps_reviewed_context_and_updates_sheet_local_text(setup):
+    _, book, output, calls = setup
+    add_second_sheet(book)
+    assert pull(book, output, "--context", "--sheet", "Second") == 0
+    text = output.read_text(encoding="utf-8")
+    assert text.count("### Data") == text.count("### Second") == 1
+    assert text.count("#### Extracted Text") == 2
+    old = context.existing_block(text, "2")
+    reviewed = old.replace("Sheet meaning.", "Reviewed meaning.")
+    output.write_text(text.replace(old, reviewed) + "\nUser annotation.\n", encoding="utf-8")
+    count = len(calls)
+    change_cell(book)
+    assert pull(book) == 0
+    updated = output.read_text(encoding="utf-8")
+    assert context.existing_block(updated, "2") == reviewed
+    assert "- 43" in updated and "User annotation." in updated
+    assert len(calls) == count
+    assert updated.count("### Data") == updated.count("### Second") == 1
+    assert updated.index("### Data") < updated.index("- 43") < updated.index("### Second")
+    assert pull(book, None, "--context", "--sheet", "Second") == 1
+    assert output.read_text(encoding="utf-8") == updated

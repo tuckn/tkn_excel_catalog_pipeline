@@ -186,7 +186,17 @@ def test_build_preserves_bytes_outside_block_and_reuses_cache(build_setup) -> No
     added = context.existing_block(note.read_bytes().decode("utf-8-sig"), "1")
     assert added is not None
     assert "### Data\r\n" in added
-    assert note.read_bytes().replace(added.encode("utf-8") + b"\r\n\r\n", b"", 1) == before
+    before_text = before.decode("utf-8-sig")
+    after_text = note.read_bytes().decode("utf-8-sig")
+    # Layout now replaces the standalone sheet heading when adding its context.
+    assert note.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert (
+        after_text.split("<!-- excel-catalog:", 1)[0]
+        == before_text.split("<!-- excel-catalog:", 1)[0]
+    )
+    assert after_text.endswith("\r\n## My annotations\r\n\r\nKeep this.\r\n")
+    assert after_text.count("### Data\r\n") == 1
+    assert after_text.index("### Data") < after_text.index("#### Extracted Text")
     assert workbook.read_bytes() == source_before
     images = list((note.parent / "img").rglob("*.png"))
     assert len(images) == 1

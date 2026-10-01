@@ -23,6 +23,7 @@ from ..note_resources import (
     managed_blocks,
 )
 from ..note_yaml import SourcePathDumper
+from ..sheet_layout import arrange_sheets, sheet_id
 
 WINDOWS_PATH_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
 YAML_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
@@ -302,15 +303,23 @@ def _render_map(workbook: WorkbookInfo) -> str:
     return "\n".join(rows)
 
 
-def _render_text(workbook: WorkbookInfo) -> str:
-    if workbook.read_status != "ok":
-        return f"Extraction unavailable: {workbook.read_status}."
-    if not workbook.sheet_text:
-        return "No text extracted."
-    sections: list[str] = []
-    for sheet_name, values in workbook.sheet_text.items():
-        sections.extend([f"### {sheet_name}", "", *[f"- {value}" for value in values], ""])
-    return "\n".join(sections).rstrip()
+def _sheet_extraction(workbook: WorkbookInfo) -> dict[str, str]:
+    result = {}
+    for sheet in workbook.sheets:
+        name = sheet["name"]
+        values = workbook.sheet_text.get(name, [])
+        lines = ["- " + value.replace("\n", "\n  ") for value in values]
+        status = workbook.sheet_text_status.get(name, "complete")
+        if workbook.read_status != "ok":
+            lines.append(f"Extraction unavailable: {workbook.read_status}.")
+        elif status == "unavailable":
+            lines.append("Extraction unavailable for this sheet type or saved sheet data.")
+        elif status == "truncated":
+            lines.append("Text omitted: workbook extraction character limit reached.")
+        elif not values:
+            lines.append("No text extracted.")
+        result[sheet_id(sheet)] = "\n".join(lines)
+    return result
 
 
 def note_filename(workbook: WorkbookInfo) -> str:
@@ -420,7 +429,6 @@ def render_note(
                 "context_status": existing_frontmatter.get("contextStatus", "not-generated"),
                 "workbook_path": f"`{workbook.path}`",
                 "workbook_map": _render_map(workbook),
-                "extracted_text": _render_text(workbook),
             }
         )
         sections = managed_blocks(rendered_template.body, template)
@@ -448,9 +456,18 @@ def render_note(
         )
         if refresh_source_properties:
             for section in sections:
+                if section.name == "sheet-contexts":
+                    if not _marker_pattern("sheet-contexts").search(body):
+                        body += "\n\n" + section.text + "\n"
+                    continue
                 body = _replace_managed(body, section)
     else:
         body = rendered_template.body.rstrip() + "\n"
+    if refresh_source_properties or existing is None:
+        try:
+            body = arrange_sheets(body, workbook.sheets, extracted=_sheet_extraction(workbook))
+        except ValueError as exc:
+            raise NoteError(str(exc)) from exc
     yaml_text = yaml.dump(
         frontmatter,
         Dumper=FrontmatterDumper,

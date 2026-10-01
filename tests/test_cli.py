@@ -160,7 +160,7 @@ def test_config_init_creates_user_config(monkeypatch, tmp_path: Path, capsys) ->
     assert payload["status"] == "unchanged"
 
 
-def test_cli_pull_all_sources_writes_note_state_and_report(
+def test_cli_pull_source_writes_note_state_and_report(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:  # type: ignore[no-untyped-def]
     workbooks = tmp_path / "workbooks"
@@ -647,7 +647,7 @@ def test_config_show_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> No
 
 
 @pytest.mark.parametrize("options", [[], ["--context"], ["--dry-run"], ["--context", "--force"]])
-def test_pull_requires_source_before_config_or_execution(monkeypatch, capsys, options):
+def test_pull_requires_target_before_config_or_execution(monkeypatch, capsys, options):
     def forbidden(*args, **kwargs):
         raise AssertionError("No config, scanning, AI, or writes allowed")
 
@@ -657,7 +657,7 @@ def test_pull_requires_source_before_config_or_execution(monkeypatch, capsys, op
         main(["--config", "missing.yaml", "pull", *options])
     assert failure.value.code == 2
     captured = capsys.readouterr()
-    assert "required: --source" in captured.err
+    assert "one of the arguments --source --all-sources is required" in captured.err
     assert not captured.out
 
 
@@ -686,6 +686,7 @@ def test_pull_rejects_ambiguous_targets_before_loading(monkeypatch, capsys, opti
     "target,expected",
     [
         (["--source", "two"], ["two"]),
+        (["--all-sources"], ["one", "two"]),
     ],
 )
 def test_pull_selects_only_explicit_targets(
@@ -731,3 +732,68 @@ def test_profile_auto_is_rejected_before_loading_config(monkeypatch, capsys):
     assert "auto' was removed" in captured.err
     assert "default-ja, default-en, or a custom profile" in captured.err
     assert captured.out == ""
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_pull_all_sources_processes_multiple_workbooks(monkeypatch, tmp_path, capsys, dry_run):
+    from excel_catalog_pipeline.config import DEFAULT_CONFIG, validate_config
+    from excel_catalog_pipeline.state import load_state
+
+    workbooks = {
+        name: create_workbook(tmp_path / name / "book.xlsx") for name in ("one", "two")
+    }
+    original_bytes = {name: book.read_bytes() for name, book in workbooks.items()}
+    config = validate_config(
+        {
+            **DEFAULT_CONFIG,
+            "sources": {
+                name: {
+                    "workbooks_dir": str(book.parent),
+                    "notes": {"dir": str(tmp_path / (name + "-notes"))},
+                }
+                for name, book in workbooks.items()
+            },
+        }
+    )
+    state = tmp_path / "state.json"
+    reports = tmp_path / "reports"
+    monkeypatch.setattr(cli_module, "load_config", lambda **kwargs: config)
+    monkeypatch.setattr(pipeline_module, "state_path", lambda: state)
+
+    result = main(
+        ["--report-dir", str(reports), "pull", "--all-sources"]
+        + (["--dry-run"] if dry_run else [])
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert result == 0
+    assert len(captured.out.splitlines()) == 1
+    assert payload["writeEnabled"] is not dry_run
+    assert payload["statusCounts"] == {"would-create" if dry_run else "created": 2}
+    for name, book in workbooks.items():
+        assert book.read_bytes() == original_bytes[name]
+        assert (tmp_path / (name + "-notes") / "book.xlsx.md").exists() is not dry_run
+    assert state.exists() is not dry_run
+    assert reports.exists() is not dry_run
+    if not dry_run:
+        assert len(load_state(state)["entries"]) == 2
+        report = Path(payload["reportPath"])
+        assert len(list(reports.glob("*-pull"))) == 1
+        details = json.loads((report / "details.json").read_text(encoding="utf-8"))
+        assert {action["sourceRoot"] for action in details} == {"one", "two"}
+
+
+def test_pull_all_sources_requires_configured_sources(monkeypatch, capsys):
+    from excel_catalog_pipeline.config import DEFAULT_CONFIG, validate_config
+
+    config = validate_config({**DEFAULT_CONFIG, "sources": {}})
+    monkeypatch.setattr(cli_module, "load_config", lambda **kwargs: config)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("No pull or report allowed without configured sources")
+
+    monkeypatch.setattr(cli_module, "run_pull", forbidden)
+    monkeypatch.setattr(cli_module, "write_report", forbidden)
+    assert main(["pull", "--all-sources"]) == 3
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["status"] == "config-error"

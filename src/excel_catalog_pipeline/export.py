@@ -26,6 +26,7 @@ from .models import Action, AppConfig, SourceConfig, WorkbookInfo
 from .note_yaml import SourcePathDumper
 from .paths import state_root
 from .shared_read import read_shared
+from .sheet_layout import arrange_sheets, managed
 
 EXTENSIONS = {".xlsx", ".xlsm"}
 
@@ -132,11 +133,6 @@ def _render_note(info: WorkbookInfo, data: bytes, config: AppConfig, with_contex
         _render_map(info),
         "<!-- excel-catalog:end workbook-map -->",
         "",
-        "<!-- excel-catalog:begin extracted-text -->",
-        "## Extracted Text",
-        "",
-        "Saved cell values and formulas; no recalculation. Drawing text is included when readable.",
-        "",
     ]
     for sheet in sheets:
         if not sheet["part"].startswith("xl/worksheets/"):
@@ -144,7 +140,15 @@ def _render_note(info: WorkbookInfo, data: bytes, config: AppConfig, with_contex
         evidence = extract_sheet(
             data, sheet, max_cells=config.context.max_cells, max_objects=config.context.max_objects
         )
-        lines.extend(["### " + _text(sheet["name"]).replace("\n", " "), ""])
+        lines.extend(
+            [
+                "<!-- excel-catalog:begin sheet-text-" + sheet["id"] + " -->",
+                "#### Extracted Text",
+                "",
+                "Saved cell values and formulas; no recalculation. Drawing text is included when readable.",
+                "",
+            ]
+        )
         for cell in evidence["cells"]:
             text = _text(cell["text"]).replace("\n", "\n  ")
             lines.append(f"- {cell['cell']}: {text}")
@@ -158,12 +162,19 @@ def _render_note(info: WorkbookInfo, data: bytes, config: AppConfig, with_contex
             lines.append("- Extraction note: " + warning)
         if not evidence["cells"] and not evidence["objects"]:
             lines.append("No cell or drawing text extracted.")
-        lines.append("")
-    lines.extend(["<!-- excel-catalog:end extracted-text -->", ""])
+        lines.extend(["<!-- excel-catalog:end sheet-text-" + sheet["id"] + " -->", ""])
+    for sheet in sheets:
+        if sheet["name"] not in worksheet_names:
+            lines.append(
+                managed(
+                    "sheet-text-" + sheet["id"],
+                    "#### Extracted Text\n\nExtraction unavailable for this sheet type.",
+                )
+            )
     header = yaml.dump(
         frontmatter, Dumper=SourcePathDumper, allow_unicode=True, sort_keys=False, width=1000
     )
-    return "---\n" + header + "---\n\n" + "\n".join(lines)
+    return "---\n" + header + "---\n\n" + arrange_sheets("\n".join(lines), sheets)
 
 
 def _plain_markdown(text: str) -> str:

@@ -102,7 +102,7 @@ def update_text(text: str, sheet_id: str, block: str) -> str:
     if block_pattern(sheet_id).search(text):
         return block_pattern(sheet_id).sub(lambda _: block, text, count=1)
     newline = "\r\n" if "\r\n" in text else "\n"
-    # Keep the workbook overview first, followed by sheet context and extracted text.
+    # Insert beside existing managed sections; arrange_sheets establishes final body order.
     offset = text.find("<!-- excel-catalog:begin extracted-text -->")
     if offset < 0:
         map_end = re.search(r"<!-- excel-catalog:end workbook-map -->(?:\r?\n){0,2}", text)
@@ -425,7 +425,9 @@ def build_context(
                 )
                 block_hash = digest(block.encode())
                 block = block.replace("\r\n", "\n").replace("\n", newline)
-                new_text = update_text(text, sheet["id"], block)
+                new_text = arrange_context(
+                    update_text(text, sheet["id"], block), sheet_list(data), writing
+                )
                 if include_overview:
                     new_text = patch_frontmatter(
                         new_text, {"contextStatus": "stale", "updated": utc_now()}

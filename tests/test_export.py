@@ -62,6 +62,14 @@ def test_plain_export_is_adjacent_and_independent(environment, capsys):
     assert note.frontmatter["sourceFileName"] == "book.xlsx"
     assert not {"sourceRoot", "sourceId", "noteId", "fileKind"}.intersection(note.frontmatter)
     assert "A1: Catalog entry" in note.body and "B1: 42" in note.body
+    assert note.body.count("### Data") == 1
+    assert "\n## Extracted Text" not in note.body
+    assert (
+        note.body.index("## Workbook Map")
+        < note.body.index("### Data")
+        < note.body.index("#### Extracted Text")
+    )
+    assert "使用profile" not in note.body and "## ブック要約" not in note.body
     assert "Workbook Map" in note.body and "Populated cells" in note.body
     assert "excel-catalog:" not in note.body
     assert result["exported"] == 1 and result["usage"]["calls"] == 0
@@ -121,11 +129,17 @@ def test_context_export_has_overview_images_and_no_persistent_cache(environment,
     note = read_note(output)
     assert note.frontmatter["contextStatus"] == "current"
     assert (
-        note.body.index("Workbook meaning.")
+        note.body.index("Workbook Map")
+        < note.body.index("Workbook meaning.")
         < note.body.index("Sheet meaning.")
-        < note.body.index("Workbook Map")
     )
     assert "excel-catalog:" not in note.body
+    assert note.body.count("### Data") == 1
+    assert (
+        note.body.index("## Workbook Map")
+        < note.body.index("Sheet meaning.")
+        < note.body.index("#### Extracted Text")
+    )
     assert calls == ["sheet", "workbook"] and result["usage"]["calls"] == 2
     images = list(book.parent.glob("img/*/*/*/001.png"))
     assert len(images) == 1

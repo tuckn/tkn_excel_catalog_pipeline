@@ -229,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Apply Excel-to-Markdown changes. Normal execution writes proxy notes, PNG cover attachments, and "
             "synchronization state; use --dry-run for a read-only preview. "
-            "Select the configured repository with --source ID."
+            "Select one configured source with --source ID or all configured sources with --all-sources."
         ),
     )
     pull.add_argument(
@@ -271,7 +271,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --context, regenerate and intentionally replace edited generated sections.",
     )
     _add_generation_options(pull)
-    _add_common(pull)
+    pull_targets = pull.add_mutually_exclusive_group(required=True)
+    pull_targets.add_argument("--source", help="Process one configured source id.")
+    pull_targets.add_argument(
+        "--all-sources", action="store_true", help="Process all configured sources."
+    )
     _add_execution_mode(pull, legacy_write_option="--write-notes")
     _add_preference(pull)
 

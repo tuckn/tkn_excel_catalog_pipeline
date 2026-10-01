@@ -171,6 +171,7 @@ class WorkbookInfo:
     sheets: list[dict[str, str]] = field(default_factory=list)
     sheet_inventory: dict[str, SheetInventory] = field(default_factory=dict)
     sheet_text: dict[str, list[str]] = field(default_factory=dict)
+    sheet_text_status: dict[str, str] = field(default_factory=dict)
     content_fingerprint: str = ""
     read_status: str = "ok"
     warnings: list[str] = field(default_factory=list)

@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.2.2 - 2026-10-02
+
+- Workbook Mapをタイトル直下へ移動し、ブック要約と各シートの説明より先に表示。通常pull・export・context付き出力で順序を統一。
+
+## 3.2.1 - 2026-10-02
+
+- `pull --all-sources` を復元。`--source <id>` との選択式で登録済みの全 source を処理し、`--context`・cover・`--dry-run` にも対応。
+- 対象の省略・併用は実行前にエラーにし、複数 source の通常取り込み・dry-run・AI context の対象選択を検証。
+
+## 3.2.0 - 2026-10-02
+
+- シートごとの説明・出典画像の後に `#### Extracted Text` を配置。通常pullと独立exportでも、シート単位の構成と最後のWorkbook Mapを共通化。
+- 通常pullでは既存contextと使用profileを保持し、抽出欄だけ更新。旧ブック全体の抽出欄を次回pullで移行し、手書き本文とcontextの保護判定を維持。
+- 代理ノートの文字数上限で省略した抽出と、空・抽出非対応を区別して表示。
+
 ## 3.1.0 - 2026-10-01
 
 - `generation.generators.<id>` に接続・文章profile・Bridge上書き・共通補足を複数保存。CLI、source、既定の順でgeneratorを選択。

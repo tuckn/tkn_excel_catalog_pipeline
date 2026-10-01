@@ -7,12 +7,7 @@ from typing import Any
 
 from .context_profiles import ContextProfile
 from .context_source import ContextError
-
-BLOCK = re.compile(
-    r"<!-- excel-catalog:begin (?P<name>context-\d+|context-workbook|sheet-contexts|workbook-map|extracted-text) -->\r?\n"
-    r".*?<!-- excel-catalog:end (?P=name) -->",
-    re.DOTALL,
-)
+from .sheet_layout import arrange_sheets
 
 
 def sheet_heading(name: str) -> str:
@@ -69,35 +64,8 @@ def migrate_legacy_block(
 
 
 def arrange_context(text: str, sheets: list[dict[str, str]], profile: ContextProfile) -> str:
-    """Reassign managed blocks to their existing slots, preserving every other byte."""
-    matches = list(BLOCK.finditer(text))
-    by_name = {match["name"]: match.group() for match in matches}
-    if len(by_name) != len(matches):
-        raise ContextError("Duplicate managed body markers; repair the note before rebuilding")
-    if "context-workbook" not in by_name:
-        return text
-    newline = "\r\n" if "\r\n" in text else "\n"
-    by_name["sheet-contexts"] = (
-        "<!-- excel-catalog:begin sheet-contexts -->"
-        + newline
-        + "## "
-        + profile.labels["sheet_heading"]
-        + newline
-        + "<!-- excel-catalog:end sheet-contexts -->"
-    )
-    order = ["context-workbook", "sheet-contexts"]
-    order += ["context-" + sheet["id"] for sheet in sheets]
-    # Preserve any retired sections kept by the caller, after current sheets.
-    order += [name for name in by_name if name.startswith("context-") and name not in order]
-    order += ["extracted-text", "workbook-map"]
-    blocks = [by_name[name] for name in order if name in by_name]
-    # A new Sheets header shares the first slot. Later runs have equal slot counts.
-    extra = len(blocks) - len(matches)
-    replacements = [(newline * 2).join(blocks[: extra + 1])] + blocks[extra + 1 :]
-    result = []
-    offset = 0
-    for match, replacement in zip(matches, replacements, strict=True):
-        result.extend([text[offset : match.start()], replacement])
-        offset = match.end()
-    result.append(text[offset:])
-    return "".join(result)
+    """Group each sheet's context and extraction without changing its context hash."""
+    try:
+        return arrange_sheets(text, sheets, heading=profile.labels["sheet_heading"])
+    except ValueError as exc:
+        raise ContextError(str(exc)) from exc

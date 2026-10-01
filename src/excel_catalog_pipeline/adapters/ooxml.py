@@ -215,17 +215,27 @@ def read_sheet_text(
     archive: zipfile.ZipFile,
     sheets: list[dict[str, str]],
     max_text_chars: int,
+    *,
+    statuses: dict[str, str] | None = None,
 ) -> dict[str, list[str]]:
     shared = _shared_strings(archive)
     remaining = max_text_chars
     result: dict[str, list[str]] = {}
+    statuses = statuses if statuses is not None else {}
     for sheet in sheets:
-        if remaining <= 0:
-            break
         path = sheet.get("path", "")
+        name = sheet.get("name", path)
+        if not path.startswith("xl/worksheets/"):
+            statuses[name] = "unavailable"
+            continue
+        if remaining <= 0:
+            statuses[name] = "truncated"
+            continue
         root = _parse_entry(archive, path) if path else None
         if root is None:
+            statuses[name] = "unavailable"
             continue
+        statuses[name] = "complete"
         values: list[str] = []
         seen: set[str] = set()
         for cell in root.iter():
@@ -235,9 +245,13 @@ def read_sheet_text(
             if not text or text.casefold() in seen:
                 continue
             seen.add(text.casefold())
-            values.append(text)
-            remaining -= len(text)
             if remaining <= 0:
+                statuses[name] = "truncated"
+                break
+            values.append(text[:remaining])
+            remaining -= len(text)
+            if remaining < 0:
+                statuses[name] = "truncated"
                 break
         if values:
             result[sheet.get("name", path)] = values
@@ -290,10 +304,11 @@ def inspect_workbook(
             info.custom = read_custom_properties(archive)
             info.sheets = read_sheets(archive)
             info.sheet_inventory = {
-                sheet["sheetId"]: read_inventory(archive, sheet["path"])
-                for sheet in info.sheets
+                sheet["sheetId"]: read_inventory(archive, sheet["path"]) for sheet in info.sheets
             }
-            info.sheet_text = read_sheet_text(archive, info.sheets, max_text_chars)
+            info.sheet_text = read_sheet_text(
+                archive, info.sheets, max_text_chars, statuses=info.sheet_text_status
+            )
             info.content_fingerprint = content_fingerprint(archive)
             if any(name.casefold().startswith("_xmlsignatures/") for name in archive.namelist()):
                 info.warnings.append("Digitally signed OOXML package; metadata writes are refused.")
