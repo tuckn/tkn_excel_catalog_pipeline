@@ -4,10 +4,7 @@ language: Japanese
 labels:
   sheet_heading: シート
   profile: 使用profile
-  unknown_profile: 未記録
-  content: 内容
   source_images: 出典画像
-  legacy: 既存contextの本文を保持しています。シート要約は再生成時に追加されます。
 ---
 
 #### シート要約

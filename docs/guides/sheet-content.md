@@ -168,7 +168,7 @@ Frontmatter の `contextStatus` で、説明と保存済みの Excel の対応�
 | `current` | 表示中のシートと選択したシートすべての説明が、保存済みの Excel と対応しています。 | なし |
 | `partial` | 説明はブックと対応していますが、説明のないシートがあります。 | 不足するシートを `--sheet` で指定するか、`--sheet` を省略して実行します。 |
 | `stale` | 説明の生成後に Excel の内容が変わったか、全体の更新が完了していません。 | `--context` を付けて `pull` します。 |
-| `unverified` | 手直しされた説明や、旧形式の説明があり、Excel との対応を記録で確認できません。 | 内容を確認し、必要なら `--context --force` で生成し直します。 |
+| `unverified` | 本文が手直しされているか対応する生成記録がなく、Excel との対応を確認できません。 | 内容を確認し、必要なら `--context --force` で生成し直します。 |
 
 `current` は、説明と Excel の対応を示す状態です。
 人が内容を確認したことや、説明の正確さは意味しません。
@@ -201,7 +201,7 @@ tkn-excel-note pull --source workbooks --context --sheet "手順" --force
 Excel からシートを削除した場合、`--context` を付けた `pull` で、そのシートの説明を記録と照合してから取り除きます。
 説明が手直しされていれば停止します。
 削除したシートの画像は残します。
-旧バージョンから取り込んだ説明は削除せずに残し、ブック要約の材料には使いません。
+生成記録が取り込み済みの説明として示すものは削除せずに残し、削除されたシートの説明はブック要約の材料には使いません。
 
 同じノートの生成が同時に実行されないよう、ノートごとにロックファイルを作ります。
 処理を強制終了した後にロックが残った場合は、処理が動いていないことを確認してから削除してください。
@@ -249,7 +249,7 @@ img/
 
 | 保存先 | 内容 |
 | --- | --- |
-| `~/.tkn/excel_note/state/context/` | `pull` の再利用・保護の記録、旧形式の説明を取り込んだときのバックアップ、AI の使用量 |
+| `~/.tkn/excel_note/state/context/` | `pull` の再利用・保護の記録、AI の使用量 |
 | `~/.tkn/excel_note/state/export/usage/` | `export` の AI の使用量 |
 
 使用量の記録には、トークン数、所要時間、GenAI Bridge の実行記録、画像のハッシュ値、Bridge の profile 名、送った根拠データの文字数が入ります。
@@ -343,39 +343,12 @@ profile のファイルを変更すると、`pull` は変更した段階を生�
 独自の profile の変更は、次の実行から反映されます。
 同梱の profile を編集した場合は、`uv tool install . --reinstall` で再インストールしてください。
 
-## 旧言語設定からの移行
-
-`generation.language`、`generation.prompt_profile: auto`、`--profile auto` は廃止されました。
-これらが残っていると、修正方法を示すエラーになります。
-設定ファイルは自動では書き換えません。
-
-`generation.language` を削除し、`generation.prompt_profile` を次のように指定します。
-
-| 旧設定 | 新しい `generation.prompt_profile` |
-| --- | --- |
-| `default-ja` / `default-en` / 独自の profile を指定していた | そのまま |
-| `auto` または profile なし、かつ `language` が `English` / `en`（大文字・小文字を区別しない） | `default-en` |
-| `auto` または profile なし、かつ `language` が `Japanese` / `ja`、または `language` なし | `default-ja` |
-| `auto` または profile なし、かつ上記以外の `language` | その言語の独自の profile を作成して指定 |
-
-設定ファイルはファイルごとに検証します。
-ユーザー共通の設定、作業フォルダの `.tkn/config.yaml`、`--config` で指定するファイルのすべてから旧項目を削除してください。
-修正後、`tkn-excel-note config show` で有効な profile を確認できます。
-
-### 旧形式の説明
-
-旧バージョンで生成した説明は、記録と本文が一致していれば、AI を呼ばずに見出しの階層だけを新しい構成に合わせます。
-本文、表、画像の参照は変更しません。
-記録のない説明や手直しされた説明は、整形せずにそのまま残すため、生成し直すまで旧形式の見出しが混在する場合があります。
-旧形式の説明に「シート要約」は追加しません。
-新しい構成で生成し直す場合は、対象のシートを `--sheet` で指定して `--force` を付けます。
-
 ## シートごとの抽出テキスト
 
 各シートは、contextの説明・出典画像に続いて `#### Extracted Text` を持ちます。抽出テキストはアプリが元ブックから取得し、文章profileやAIには生成させません。
 
 `--context` なしの新規出力では、シート名と抽出欄だけを作り、ブック要約や使用profileは表示しません。通常のpullで既存ノートを更新する場合は、過去のcontextとそのprofile表示を保持します。一部シートだけ生成する場合も、未解析シートの抽出欄は残ります。
 
-既存の管理対象 `## Extracted Text` はpull時にシート内へ移行します。contextは抽出欄と別に管理するため、抽出欄の更新だけで要約が手編集扱いになることはありません。本文の例と文字数上限の扱いは[ノート形式](../reference/note-format.md)を参照してください。
+contextは抽出欄と別に管理するため、抽出欄の更新だけで要約が手編集扱いになることはありません。本文の例と文字数上限の扱いは[ノート形式](../reference/note-format.md)を参照してください。
 
 Workbook Mapはタイトル直下に置きます。contextがある場合も、Workbook Map、ブック要約、シートの順に並べます。

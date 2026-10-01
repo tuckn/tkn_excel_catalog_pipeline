@@ -51,18 +51,6 @@ def test_metadata_mapping_round_trip(tmp_path: Path) -> None:
     }
 
 
-def test_legacy_nouns_and_description_remain_readable(tmp_path: Path) -> None:
-    note_path = tmp_path / "legacy.md"
-    note_path.write_text(
-        "---\ntype: Excel\ntitle: T\ndescription: D\nnouns:\n"
-        "  - '[[Engineer, Myself]]'\n  - '[[Excel]]'\nsourceFileName: book.xlsx\n---\n",
-        encoding="utf-8",
-    )
-    assert note_metadata(read_note(note_path))["categories"] == "Engineer, Myself"
-    assert note_metadata(read_note(note_path))["keywords"] == "Excel"
-    assert note_metadata(read_note(note_path))["comments"] == "D"
-
-
 def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) -> None:
     workbook_path = create_workbook(tmp_path / "book.xlsx")
     source = config(tmp_path)
@@ -70,7 +58,10 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
     note_path = tmp_path / "notes" / "book.xlsx.md"
     note_path.parent.mkdir()
     note_path.write_text(
-        "---\ntype: Excel\ntitle: Old\ndescription: Old\nnouns: []\nsourceFileName: book.xlsx\ncustomField: keep-me\ndate: '2026-01-01T00:00:00+09:00'\nupdated: '2026-01-01T00:00:00+09:00'\nnoteId: fixed-id\n---\n\n# Manual title\n\nHandwritten text.\n\n## Workbook Path\n\n`old.xlsx`\n\n<!-- excel-catalog:begin excel-metadata -->\n## Excel Metadata\n\n### Core\n\n- title: Old\n\n<!-- excel-catalog:end excel-metadata -->\n",
+        "---\ntype: Excel\nschemaVersion: '2.1'\ntitle: Old\ndescription: Old\n"
+        "sourceFileName: book.xlsx\ncustomField: keep-me\n"
+        "date: '2026-01-01T00:00:00+09:00'\nupdated: '2026-01-01T00:00:00+09:00'\n"
+        "noteId: fixed-id\n---\n\n# Manual title\n\nHandwritten text.\n",
         encoding="utf-8",
     )
     existing = read_note(note_path)
@@ -79,7 +70,7 @@ def test_render_preserves_unknown_fields_and_handwritten_body(tmp_path: Path) ->
     updated = read_note(note_path)
     assert updated.frontmatter["customField"] == "keep-me"
     assert updated.frontmatter["schemaVersion"] == "2.1"
-    assert updated.frontmatter["description"] == ""
+    assert updated.frontmatter["description"] == "Old"
     assert updated.frontmatter["comments"] == "Example description"
     assert list(updated.frontmatter) == [
         "type",

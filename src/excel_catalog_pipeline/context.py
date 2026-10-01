@@ -22,7 +22,7 @@ from tkn_genai_bridge import Profile
 
 from .adapters.markdown import discover_notes
 from .adapters.ooxml import content_fingerprint, read_custom_properties
-from .context_layout import arrange_context, migrate_legacy_block, sheet_heading
+from .context_layout import arrange_context, sheet_heading
 from .context_profiles import load_context_profile
 from .context_provider import (
     atomic_json,
@@ -103,10 +103,8 @@ def update_text(text: str, sheet_id: str, block: str) -> str:
         return block_pattern(sheet_id).sub(lambda _: block, text, count=1)
     newline = "\r\n" if "\r\n" in text else "\n"
     # Insert beside existing managed sections; arrange_sheets establishes final body order.
-    offset = text.find("<!-- excel-catalog:begin extracted-text -->")
-    if offset < 0:
-        map_end = re.search(r"<!-- excel-catalog:end workbook-map -->(?:\r?\n){0,2}", text)
-        offset = map_end.end() if map_end else len(text)
+    map_end = re.search(r"<!-- excel-catalog:end workbook-map -->(?:\r?\n){0,2}", text)
+    offset = map_end.end() if map_end else len(text)
     prefix, suffix = text[:offset], text[offset:]
     separator = "" if prefix.endswith(newline * 2) else newline * 2
     return prefix + separator + block + newline * 2 + suffix
@@ -466,7 +464,6 @@ def build_context(
                         "assets": assets,
                         "snapshotSha256": digest(data),
                         "sourceFingerprint": evidence["fingerprint"],
-                        "layoutVersion": 1,
                         "generator": config.generator_id,
                         "reference": reference_provenance(config),
                         **writing.provenance(),
@@ -526,10 +523,8 @@ def build_context(
 
 def _collect_context(
     text: str, note: Path, data: bytes, config: ContextConfig, state_dir: Path
-) -> tuple[str, list[dict[str, Any]], dict[Path, dict[str, Any]]]:
+) -> list[dict[str, Any]]:
     notes: list[dict[str, Any]] = []
-    migrations: dict[Path, dict[str, Any]] = {}
-    writing = load_context_profile(config)
     for sheet in sheet_list(data):
         block = existing_block(text, sheet["id"])
         if block is None:
@@ -553,17 +548,6 @@ def _collect_context(
                     status = "unverified"
             elif saved.get("snapshotSha256") == digest(data):
                 status = "current"
-        if matches:
-            migrated = migrate_legacy_block(block, sheet, saved, writing)
-            if migrated != block:
-                text = update_text(text, sheet["id"], migrated)
-                block = migrated
-                saved = {
-                    **saved,
-                    "layoutVersion": 1,
-                    "blockSha256": digest(block.replace("\r\n", "\n").encode()),
-                }
-                migrations[state_path] = saved
         notes.append(
             {
                 "sheet": sheet["name"],
@@ -575,7 +559,7 @@ def _collect_context(
                 "markdown": block,
             }
         )
-    return text, notes, migrations
+    return notes
 
 
 def _build_overview(
@@ -634,7 +618,7 @@ def _build_overview(
     result["reference"] = reference_provenance(config)
     results.append(result)
     # Validate existing blocks and all profiles even on the first dry-run.
-    text, notes, migrations = _collect_context(text, note, data, config, state_dir)
+    notes = _collect_context(text, note, data, config, state_dir)
     names = [item["sheet"] for item in notes]
     omitted = [sheet["name"] for sheet in sheets if sheet["name"] not in names]
     stale = [item["sheet"] for item in notes if item["status"] == "stale"]
@@ -762,8 +746,6 @@ def _build_overview(
             temporary.replace(note)
         finally:
             temporary.unlink(missing_ok=True)
-    for path, saved in migrations.items():
-        atomic_json(path, saved)
     if result["status"] == "written":
         atomic_json(state_path, state)
 

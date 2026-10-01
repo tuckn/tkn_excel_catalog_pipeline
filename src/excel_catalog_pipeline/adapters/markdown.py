@@ -15,7 +15,6 @@ import yaml
 
 from ..discovery import matches_any, normalize_relative_path
 from ..models import ProxyNote, SourceConfig, WorkbookInfo
-from ..note_layout import retire_sections
 from ..note_resources import (
     ManagedBlock,
     NoteResourceError,
@@ -27,7 +26,6 @@ from ..sheet_layout import arrange_sheets, sheet_id
 
 WINDOWS_PATH_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
 YAML_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
-OBSOLETE_FRONTMATTER_FIELDS = {"noun", "nouns"}
 
 
 class FrontmatterLoader(yaml.SafeLoader):
@@ -167,53 +165,20 @@ def _frontmatter_terms(value: Any) -> str:
 
 
 def note_metadata(note: ProxyNote) -> dict[str, str]:
-    schema_version = _frontmatter_string(note.frontmatter.get("schemaVersion"))
-    uses_v2_metadata = schema_version.startswith("2.") or any(
-        field in note.frontmatter for field in ("subject", "author", "categories", "comments")
-    )
-    if uses_v2_metadata:
-        categories = _frontmatter_terms(note.frontmatter.get("categories"))
-        keywords = _frontmatter_terms(note.frontmatter.get("keywords"))
-    else:
-        nouns = _frontmatter_list(note.frontmatter.get("nouns"))
-        legacy = str(note.frontmatter.get("noun", "")).strip()
-        if legacy:
-            nouns = _dedupe([legacy, *nouns])
-        targets = [_link_target(item) for item in nouns]
-        categories = _frontmatter_terms(targets[:1])
-        keywords = _frontmatter_terms(targets[1:])
     return {
         "title": _frontmatter_string(note.frontmatter.get("title")),
         "subject": _frontmatter_string(note.frontmatter.get("subject")),
         "author": _frontmatter_string(note.frontmatter.get("author")),
-        "keywords": keywords,
-        "categories": categories,
-        "comments": _frontmatter_string(
-            note.frontmatter.get("comments", note.frontmatter.get("description", ""))
-        ),
+        "keywords": _frontmatter_terms(note.frontmatter.get("keywords")),
+        "categories": _frontmatter_terms(note.frontmatter.get("categories")),
+        "comments": _frontmatter_string(note.frontmatter.get("comments")),
         "sourceFileName": _frontmatter_string(note.frontmatter.get("sourceFileName")),
     }
 
 
 def workbook_path(note: ProxyNote) -> Path | None:
-    legacy = str(note.frontmatter.get("sourceFullPath", "")).strip()
-    if legacy:
-        return Path(legacy)
-    marker = _marker_pattern("workbook-path")
-    match = marker.search(note.body)
-    section = match.group("content") if match else ""
-    if not section:
-        legacy_match = re.search(
-            r"^##\s+(?:Workbook Path|ファイルを開く)\s*$\r?\n(?P<content>.*?)(?=^##\s+|\Z)",
-            note.body,
-            re.MULTILINE | re.DOTALL,
-        )
-        section = legacy_match.group("content") if legacy_match else ""
-    code = re.search(r"`([^`\r\n]+)`", section)
-    candidate = code.group(1).strip() if code else ""
-    if not candidate:
-        candidate = next((line.strip(" `") for line in section.splitlines() if line.strip()), "")
-    return Path(candidate) if candidate else None
+    recorded = _frontmatter_string(note.frontmatter.get("sourceFullPath")).strip()
+    return Path(recorded) if recorded else None
 
 
 def frontmatter_hash(note: ProxyNote) -> str:
@@ -234,15 +199,6 @@ def _replace_managed(body: str, block: ManagedBlock) -> str:
     marker = _marker_pattern(block.name)
     if marker.search(body):
         return marker.sub(lambda _match: block.text, body, count=1)
-    headings = [re.escape(block.heading)]
-    if block.name == "workbook-path":
-        headings.append(re.escape("ファイルを開く"))
-    legacy = re.compile(
-        rf"^##\s+(?:{'|'.join(headings)})\s*$\r?\n.*?(?=^##\s+|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    if legacy.search(body):
-        return legacy.sub(lambda _match: block.text + "\n\n", body, count=1)
     separator = "" if not body or body.endswith("\n\n") else "\n\n"
     return body + separator + block.text + "\n"
 
@@ -345,8 +301,6 @@ def _merge_frontmatter(rendered: dict[str, Any], existing: dict[str, Any]) -> di
     unknown_before: dict[str, list[tuple[str, Any]]] = {}
     pending: list[tuple[str, Any]] = []
     for key, value in existing.items():
-        if key in OBSOLETE_FRONTMATTER_FIELDS:
-            continue
         if key in rendered:
             if pending:
                 unknown_before.setdefault(key, []).extend(pending)
@@ -380,15 +334,8 @@ def render_note(
 
     try:
         template = load_note_template(source.profile)
-        current_schema = _frontmatter_string(existing_frontmatter.get("schemaVersion"))
-        description = (
-            _frontmatter_string(existing_frontmatter.get("description"))
-            if current_schema.startswith("2.")
-            else ""
-        )
-        clean_body, description = retire_sections(
-            existing.body if existing else "", description, str(workbook.path)
-        )
+        description = _frontmatter_string(existing_frontmatter.get("description"))
+        clean_body = existing.body if existing else ""
         source_created = (
             workbook.core.get("created", "")
             if refresh_source_properties
@@ -446,14 +393,7 @@ def render_note(
         frontmatter["contextStatus"] = "stale"
 
     if existing:
-        body = _marker_pattern("excel-metadata").sub("", clean_body)
-        body = re.sub(
-            r"^##\s+Excel Metadata\s*$\r?\n.*?(?=^##\s+|\Z)",
-            "",
-            body,
-            count=1,
-            flags=re.MULTILINE | re.DOTALL,
-        )
+        body = clean_body
         if refresh_source_properties:
             for section in sections:
                 if section.name == "sheet-contexts":

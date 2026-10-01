@@ -12,7 +12,7 @@ from tests.test_unified_notes import add_second_sheet
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
-def test_migration_preserves_context_and_annotations_and_is_idempotent(newline):
+def test_grouping_preserves_context_and_annotations_and_is_idempotent(newline):
     context = managed("context-2", "### Second\n\nReviewed explanation.", newline)
     old = newline.join(
         [
@@ -20,7 +20,7 @@ def test_migration_preserves_context_and_annotations_and_is_idempotent(newline):
             "Before managed sections.",
             "Annotation between managed blocks.",
             context,
-            managed("extracted-text", "## Extracted Text\n### Data\n- Old", newline),
+            managed("sheet-text-1", "#### Extracted Text\n- Old", newline),
             managed("workbook-map", "## Workbook Map\nMap.", newline),
             "After managed sections.",
         ]
@@ -81,14 +81,14 @@ def test_exact_limit_does_not_claim_current_sheet_was_truncated(tmp_path):
     assert statuses == {"Data": "complete"}
 
 
-def test_old_plain_note_migrates_without_ai_and_keeps_unknown_frontmatter(tmp_path):
+def test_plain_note_refresh_keeps_unknown_frontmatter(tmp_path):
     book = create_workbook(tmp_path / "book.xlsx")
     source = SourceConfig("example", tmp_path, ("*.xlsx",), tmp_path / "notes")
     info = inspect_workbook(book, source, max_text_chars=100)
     note = tmp_path / "note.md"
     note.write_text(
         '---\ntype: Excel\nschemaVersion: "2.1"\ncustomField: keep\n---\n# Manual title\n'
-        + managed("extracted-text", "## Extracted Text\n### Data\n- Old")
+        + managed("sheet-text-1", "#### Extracted Text\n- Old")
         + "\nHandwritten text.\n",
         encoding="utf-8",
     )

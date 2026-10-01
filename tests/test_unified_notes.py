@@ -413,43 +413,6 @@ def test_unselected_reviewed_context_is_kept_and_marked_unverified(setup):
     assert [stage for stage, _ in calls[3:]] == ["workbook"]
 
 
-def test_imported_legacy_context_is_migrated_without_ai_or_content_loss(setup):
-    _, book, output, calls = setup
-    add_second_sheet(book)
-    assert pull(book, output, "--context", "--sheet", "Data") == 0
-    text = output.read_text(encoding="utf-8")
-    old = context.existing_block(text, "1")
-    legacy = (
-        "<!-- excel-catalog:begin context-1 -->\n## Data (sheetId: 1)\n\n"
-        "Imported statement.\n\n### Original topic\n\n| Key | Value |\n| --- | --- |\n| A | B |\n\n"
-        "~~~markdown\n### Literal code heading\n~~~\n"
-        "<!-- excel-catalog:end context-1 -->"
-    )
-    output.write_text(text.replace(old, legacy) + "\nPrivate annotation.\n", encoding="utf-8")
-    state_path = next(paths.app_root().rglob("sheet-1.json"))
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    for name in ("layoutVersion", "promptProfile", "profileVersion", "profileSha256"):
-        state.pop(name, None)
-    state.update(origin="import", blockSha256=context.digest(legacy.encode()))
-    state_path.write_text(json.dumps(state), encoding="utf-8")
-    assert pull(book, None, "--context", "--sheet", "Second") == 0
-    text = output.read_text(encoding="utf-8")
-    block = context.existing_block(text, "1")
-    assert "### Data\n" in block and "使用profile: 未記録" in block
-    assert "Imported statement." in block and "##### Original topic" in block
-    assert "| A | B |" in block and "~~~markdown\n### Literal code heading\n~~~" in block
-    assert "Private annotation." in text
-    assert read_note(output).frontmatter["contextUnverifiedSheets"] == ["Data"]
-    assert [evidence["sheet"] for stage, evidence in calls if stage == "sheet"] == [
-        "Data",
-        "Second",
-    ]
-    before = output.read_bytes()
-    assert pull(book, None, "--context", "--sheet", "Data") == 0
-    assert output.read_bytes() == before
-    assert len(calls) == 4
-
-
 def test_individual_profile_names_survive_later_sheet_pulls(setup):
     _, book, output, calls = setup
     add_second_sheet(book)

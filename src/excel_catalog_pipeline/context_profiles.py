@@ -111,7 +111,7 @@ def load_context_profile(config: ContextConfig, *, stage: str = "sheet") -> Cont
             raise ContextError(f"Context template {field} must be a nonempty string")
     labels = metadata.get("labels")
     required_labels = (
-        {"sheet_heading", "profile", "unknown_profile", "source_images", "legacy", "content"}
+        {"sheet_heading", "profile", "source_images"}
         if stage == "sheet"
         else {"heading", "analyzed", "omitted", "stale", "unverified"}
     )

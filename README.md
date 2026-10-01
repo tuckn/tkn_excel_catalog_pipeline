@@ -542,7 +542,7 @@ tkn-excel-note pull --source workbooks --cover sheet --cover-range "A1:Q50"
 - デジタル署名付きのブックへの書き込みは拒否します。
 - AI の説明は解釈を含みます。`contextStatus: current` は、説明と Excel の対応を示すもので、内容の正確さを保証しません。
 
-## 9. 更新・移行
+## 9. 更新
 
 リポジトリを更新した後は、CLI を再インストールします。
 
@@ -551,29 +551,6 @@ cd "C:\path\to\tkn_excel_note"
 uv tool install . --reinstall
 tkn-excel-note --version
 ```
-
-古い設定ファイルはそのまま読み込めます。
-読み込み時に新しい形式として解釈し、ファイル自体は書き換えません。
-廃止された設定が残っている場合は、修正方法を示すエラーになります。
-
-旧バージョンから更新する場合は、該当する項目を確認してください。
-
-| 該当する場合 | 必要な対応 |
-| --- | --- |
-| 2.x で `pull <ブック>` を使っていた | `export <ブック>` に置き換えます。同期は source の設定が必要です。`pull` は `--source <id>` または `--all-sources`、`push` は `--source <id>` を指定します。 |
-| `pull --all-sources` を使っていた | 3.2.1 で復元しました。そのまま使えます。 |
-| `generation.language` や `--profile auto` を設定していた | 文章の profile を指定します。対応表は「[旧言語設定からの移行](docs/guides/sheet-content.md#旧言語設定からの移行)」にあります。 |
-| 旧名 `tkn-excel-catalog-pipeline` をインストールしていた | 新しい CLI の動作を確認してから、`uv tool uninstall tkn-excel-catalog-pipeline` で削除します。 |
-| 旧保存領域 `~/.tkn/excel_catalog_pipeline/` を使っていた | 下記の手順でフォルダを移します。 |
-
-旧保存領域を使っていた場合は、CLI を実行していない状態で、`~/.tkn/excel_catalog_pipeline/` フォルダ全体を `~/.tkn/excel_note/` に名前変更します。
-設定、同期記録、説明の生成記録、バックアップがまとめて引き継がれます。
-既に `~/.tkn/excel_note/` がある場合は、自動では統合しません。
-両方の内容を確認してから、どちらを使うか決めてください。
-
-ノートの識別子、管理マーカー、ブックの固定 ID は変わらないため、既存の代理ノートを作り直す必要はありません。
-過去に `export` で書き出した Markdown は、同期の対象にはなりません。
-同期を始める場合は、別のフォルダを `notes.dir` に指定してください。
 
 バージョンごとの変更内容は [CHANGELOG.md](CHANGELOG.md) を参照してください。
 

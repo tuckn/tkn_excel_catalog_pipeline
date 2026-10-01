@@ -4,10 +4,7 @@ language: English
 labels:
   sheet_heading: Sheets
   profile: Profile
-  unknown_profile: not recorded
-  content: Content
   source_images: Source images
-  legacy: Existing context is preserved. A sheet summary will be added when regenerated.
 ---
 
 #### Sheet summary

@@ -6,7 +6,7 @@ import re
 
 BLOCK = re.compile(
     r"<!-- excel-catalog:begin (?P<name>context-\d+|context-workbook|sheet-contexts|"
-    r"sheet-heading-\d+|sheet-text-\d+|workbook-map|extracted-text) -->\r?\n"
+    r"sheet-heading-\d+|sheet-text-\d+|workbook-map) -->\r?\n"
     r".*?<!-- excel-catalog:end (?P=name) -->",
     re.DOTALL,
 )
@@ -38,8 +38,6 @@ def arrange_sheets(
     if heading is not None or "sheet-contexts" not in blocks:
         blocks["sheet-contexts"] = managed("sheet-contexts", "## " + (heading or "シート"), newline)
     if extracted is not None:
-        # The old workbook-wide extraction is replaced only by fresh source extraction.
-        blocks.pop("extracted-text", None)
         blocks = {key: value for key, value in blocks.items() if not key.startswith("sheet-text-")}
         for key, body in extracted.items():
             blocks["sheet-text-" + key] = managed(
@@ -52,7 +50,7 @@ def arrange_sheets(
         header = "sheet-heading-" + key
         context = blocks.get("context-" + key, "")
         # Prior context owns its sheet heading. Retain it verbatim for hash/review protection.
-        has_heading = re.match(r"[^\n]*\r?\n#{2,3} ", context) is not None
+        has_heading = re.match(r"[^\n]*\r?\n### ", context) is not None
         if has_heading:
             blocks.pop(header, None)
         else:
@@ -64,7 +62,6 @@ def arrange_sheets(
         match = re.fullmatch(r"context-(\d+)", name)
         if match and match[1] not in active:
             order.extend(["sheet-heading-" + match[1], name, "sheet-text-" + match[1]])
-    order.append("extracted-text")
     arranged = [blocks[name] for name in order if name in blocks]
     if not matches:
         return text.rstrip() + newline * 2 + (newline * 2).join(arranged) + newline
