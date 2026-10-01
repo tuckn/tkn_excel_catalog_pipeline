@@ -1,7 +1,9 @@
-# tkn-excel-note — Excel を Markdown にする
+# tkn-excel-note — Excel ノートを Markdown にする
 
 Excel ブックを、RAG・生成 AI・検索で参照しやすい Frontmatter 付き Markdown にします。
 まず `export` で1つのブック、またはフォルダ配下のブックを書き出せます。
+図形や画像、テキストボックス、矢印など、シート全体を画像化し、その意味を解釈して、文章化します。
+
 継続的に更新を取り込み、Frontmatter の変更を Excel へ反映する場合は、`source` を設定して `pull` / `push` で同期します。
 Excel が原本です。セル・図形の編集を Markdown から書き戻す機能はありません。
 
@@ -99,6 +101,30 @@ source 固有の背景は `sources.<id>.generation.reference` に置けます。
 
 `source` は、Excel の入力フォルダと代理ノートの保存先を組にした同期対象です。
 1ブックだけのフォルダにも、複数ブックのフォルダにも使えます。
+
+```mermaid
+flowchart LR
+    config[("設定ファイル<br/>config.yaml")]
+    books[("Excel ブック<br/>入力フォルダ・原本")]
+    notes[("代理ノート<br/>Frontmatter・本文")]
+    state[("同期記録<br/>sync-state.json")]
+    pull["pull --source workbooks<br/>Excel の更新を取り込む"]
+    edit["ノートの Frontmatter を編集"]
+    push["push --source workbooks<br/>Frontmatter の変更を反映"]
+
+    config -.->|入力フォルダ・ノート保存先| pull
+    config -.->|同期対象| push
+    books -->|Excel を保存して実行| pull
+    pull -->|作成・更新| notes
+    notes --> edit
+    edit -->|編集後に実行| push
+    push -->|対応する文書プロパティのみ更新| books
+    state <-.->|前回一致した値を比較・更新| pull
+    state <-.->|前回一致した値を比較・更新| push
+```
+
+`pull` / `push` は実行するたびに一度処理します。同期記録を使って変更方向を判定し、競合がある場合は該当ブックへの反映を見送ります。
+`push` は対応する Frontmatter 項目だけを Excel の文書プロパティへ反映し、セル・図形・ノート本文は書き戻しません。
 
 ### セットアップ
 
