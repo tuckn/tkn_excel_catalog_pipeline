@@ -23,7 +23,10 @@ from tests.test_context import rewrite_package
 def setup(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paths, "app_root", lambda: tmp_path / "application")
-    config = AppConfig("1.1.0", (), SyncConfig())
+    book = create_workbook(tmp_path / "books" / "nested" / "book.xlsx")
+    output = tmp_path / "notes" / "book.xlsx.md"
+    source = SourceConfig("library", book.parent, ("*.xlsx", "*.xlsm"), output.parent, frontmatter_term_format="plain")
+    config = AppConfig("2.0.0", (source,), SyncConfig())
     monkeypatch.setattr(cli, "load_config", lambda **kwargs: config)
     monkeypatch.setattr(context, "resolve_profile", lambda config: Profile())
     real_plan = context.generation_plan
@@ -48,16 +51,11 @@ def setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(context, "render_sheet", render)
     monkeypatch.setattr(context, "generate_markdown", generate)
-    book = create_workbook(tmp_path / "books" / "nested" / "book.xlsx")
-    output = tmp_path / "notes" / "custom.md"
     return config, book, output, calls
 
 
 def pull(book, output=None, *options):
-    arguments = ["pull", str(book)]
-    if output is not None:
-        arguments += ["--output", str(output)]
-    return cli.main(arguments + list(options))
+    return cli.main(["pull", "--source", "library", *options])
 
 
 def change_cell(book):
@@ -66,7 +64,7 @@ def change_cell(book):
     book.write_bytes(rewrite_package(book.read_bytes(), {"xl/worksheets/sheet1.xml": sheet}))
 
 
-def test_single_create_update_push_preserves_identity_and_user_text(setup):
+def test_source_create_update_push_preserves_identity_and_user_text(setup):
     _, book, output, calls = setup
     before = book.read_bytes()
     assert pull(book, output) == 0
@@ -84,7 +82,7 @@ def test_single_create_update_push_preserves_identity_and_user_text(setup):
     assert read_note(output).note_id == first.note_id
     assert "Keep this." in read_note(output).body
     body_before_push = read_note(output).body
-    assert cli.main(["push", str(output)]) == 0
+    assert cli.main(["push", "--source", "library", "--note", str(output)]) == 0
     assert read_note(output).body == body_before_push
     with zipfile.ZipFile(book) as archive:
         assert read_core_properties(archive)["title"] == "Edited title"
@@ -137,7 +135,7 @@ def test_edited_ai_sections_are_protected_before_writes(setup, phrase):
     assert "Personal annotation." in output.read_text(encoding="utf-8")
 
 
-def test_single_note_can_join_batch_without_duplication_or_losing_base(setup, monkeypatch):
+def test_source_root_change_preserves_note_and_base(setup, monkeypatch):
     config, book, output, _ = setup
     assert pull(book, output) == 0
     note_id = read_note(output).note_id
@@ -161,18 +159,9 @@ def test_single_note_can_join_batch_without_duplication_or_losing_base(setup, mo
     assert list(output.parent.rglob("*.md")) == [output]
     state = json.loads(paths.state_path().read_text(encoding="utf-8"))
     assert len(state["entries"]) == 1
-    assert cli.main(["push", str(output)]) == 0
+    assert cli.main(["push", "--source", "library", "--note", str(output)]) == 0
     with zipfile.ZipFile(book) as archive:
         assert read_core_properties(archive)["title"] == "My title"
-
-
-def test_existing_unrelated_markdown_is_not_overwritten_even_with_force(setup):
-    _, book, output, calls = setup
-    output.parent.mkdir()
-    output.write_text("My unrelated document.", encoding="utf-8")
-    assert pull(book, output, "--context", "--force") == 3
-    assert output.read_text() == "My unrelated document." and not calls
-    assert not paths.state_path().exists()
 
 
 def test_unknown_sheet_fails_before_first_note_is_written(setup):
@@ -219,7 +208,7 @@ def test_conflicting_changes_do_not_overwrite_either_side(setup):
     )
     create_workbook(book, title="Excel edit")
     before = book.read_bytes(), output.read_bytes()
-    assert cli.main(["push", str(output)]) == 2
+    assert cli.main(["push", "--source", "library", "--note", str(output)]) == 2
     assert (book.read_bytes(), output.read_bytes()) == before
 
 
@@ -233,7 +222,7 @@ def test_application_store_uses_new_name_even_if_legacy_directory_exists(tmp_pat
 
 
 def test_old_generation_commands_are_not_available():
-    for command in ("export", "context"):
+    for command in ("context",):
         with pytest.raises(SystemExit) as failure:
             cli.build_parser().parse_args([command])
         assert failure.value.code == 2

@@ -16,7 +16,8 @@ CLI は次の順に設定を読み、後の値を優先します。
 `tkn-excel-note config show` で読み込まれたファイルと有効な値を確認できます。
 
 保存領域は `~/.tkn/excel_note/` です。旧領域を使っていた場合は、[移行手順](../../README.md#旧版から更新する)に沿ってフォルダ全体を名前変更します。実際の設定ファイルは `config show` で確認できます。
-単体ファイルの `pull <workbook>` / `push <note>` に `sources` 登録は不要です。設定済み source に属する場合はその設定を使い、未登録の単体入力では用語を `plain` で出力します。
+`export <file-or-folder>` に `sources` 登録は不要です。入力と出力先は引数だけで決まり、`sources`・`sync`・`cover` の設定を使いません。共通の `generation` 設定は抽出上限・AI 接続・profileに使います。
+`pull` / `push` / `status` / `adopt` / `delete-notes` は設定済み source が対象で、`--source ID` が必須です。
 
 ## 探索範囲
 
@@ -67,7 +68,7 @@ Windows パスを YAML のシングルクォートで囲むと、バックスラ
 
 ## cover の設定
 
-トップレベルの `cover` は、単体・source・全 source の `pull` に共通で適用します。
+トップレベルの `cover` は、選択した source の `pull` に適用します。`export` は cover を生成しません。
 シート画像方式を既定にする最小設定は次のとおりです。
 
 ```yaml
@@ -90,7 +91,7 @@ cover:
 
 ## AI 生成の設定
 
-`pull --context` は `generation` セクションを使います。AI の接続先、認証、モデルは GenAI Bridge の共有設定で管理します。[生成時の設定と保存内容](../guides/sheet-content.md#準備と実行)を参照してください。
+`export --context` と `pull --source ID --context` は `generation` セクションを使います。AI の接続先、認証、モデルは GenAI Bridge の共有設定で管理します。[生成時の設定と保存内容](../guides/sheet-content.md#準備と実行)を参照してください。
 
 
 ## contextのprofile
@@ -104,7 +105,7 @@ generation:
 
 `generation.language` と `prompt_profile: auto` / `--profile auto` は廃止しました。残っていると設定または引数エラーになります。[旧言語設定からの移行](../guides/sheet-content.md#旧言語設定からの移行)を参照してください。旧スキーマの読み込み条件も同節に記載しています。
 
-`generation.prompt_profile` は文章のprofile名（既定 `default-ja`）、`generation.profile_dirs` はユーザー定義profileを置いた親フォルダの一覧（既定 `[]`）です。CLIの `pull --context --profile <名前>` が設定より優先します。`profile_dirs` は上位の設定で一覧全体を置き換え、相対パスは実行時の作業フォルダから解決します。
+`generation.prompt_profile` は文章のprofile名（既定 `default-ja`）、`generation.profile_dirs` はユーザー定義profileを置いた親フォルダの一覧（既定 `[]`）です。CLIの `export --context --profile <名前>` / `pull --source ID --context --profile <名前>` が設定より優先します。`profile_dirs` は上位の設定で一覧全体を置き換え、相対パスは実行時の作業フォルダから解決します。
 
 ```yaml
 generation:

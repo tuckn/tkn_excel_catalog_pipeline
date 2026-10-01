@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.0 - 2026-10-01
+
+- 単体・フォルダの独立した Markdown 書き出しを `export` に分離。既定は原本の隣の `<Excelファイル名>.md`、フォルダは再帰探索。
+- `export --context` は共通のシート解析・ブック要約・profileを使用。同期記録や生成キャッシュを使わず、出力の置き換えは `--force` 指定と全生成の成功後に限定。
+- `pull` / `push` / `status` / `adopt` / `delete-notes` の `--source` を必須化。単体 pull/push と `--all-sources` を廃止。
+- 独立出力に `type: ExcelExport` と原本の識別値・生成日時を記録し、pushの対象から除外。
+- READMEを単体書き出し、フォルダ書き出し、source同期の順に更新。sourceのcover・context再利用・メタデータ同期は継続。
+
+
 このプロジェクトの主な利用者向け変更を記録します。
 既存の履歴は Git の変更内容と `pyproject.toml` のバージョンから再構成しています。
 日付はバージョン更新コミットの日付であり、公開リリース日を示すものではありません。

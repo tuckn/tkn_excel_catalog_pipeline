@@ -139,9 +139,9 @@ def _assets_intact(note: Path, state: dict[str, Any]) -> bool:
 
 
 @contextmanager
-def note_lock(note: Path) -> Iterator[None]:
+def note_lock(note: Path, *, storage_root: Path | None = None) -> Iterator[None]:
     # A persistent lock left by an abruptly killed process is intentionally not stolen.
-    location = state_root() / "context" / "locks" / (digest(str(note.resolve()).encode()) + ".lock")
+    location = (storage_root or state_root()) / "context" / "locks" / (digest(str(note.resolve()).encode()) + ".lock")
     location.parent.mkdir(parents=True, exist_ok=True)
     try:
         stream = location.open("x", encoding="utf-8")
@@ -249,6 +249,8 @@ def build_context(
     note_path: Path | None = None,
     preview_text: str | None = None,
     include_overview: bool = False,
+    storage_root: Path | None = None,
+    usage_root: Path | None = None,
 ) -> dict[str, Any]:
     if note_path is None:
         note, book_key = find_proxy(source, workbook, data)
@@ -257,7 +259,9 @@ def build_context(
         book_key = digest(str(workbook.resolve()).encode())[:20]
     results: list[dict[str, Any]] = []
     records: list[dict[str, Any]] = []
-    state_dir = state_root() / "context" / digest(str(note.resolve()).encode())[:24]
+    runtime_root = storage_root or state_root()
+    usage_directory = usage_root or runtime_root / "context" / "usage"
+    state_dir = runtime_root / "context" / digest(str(note.resolve()).encode())[:24]
     # Validate both stages before any rendering, paid call, or persistent write.
     writing = load_context_profile(config)
     if include_overview:
@@ -366,7 +370,7 @@ def build_context(
                 for image in images:
                     image["relativePath"] = (relative_dir / image["image"]).as_posix()
                 evidence["images"] = images
-                usage_path = state_root() / "context" / "usage" / f"{uuid.uuid4().hex}.json"
+                usage_path = usage_directory / f"{uuid.uuid4().hex}.json"
                 markdown = generate_markdown(
                     config,
                     evidence,
@@ -411,7 +415,7 @@ def build_context(
                         new_text, {"contextStatus": "stale", "updated": utc_now()}
                     )
                 if read_shared(workbook) != data:
-                    raise ContextError("Workbook changed during generation; run pull again")
+                    raise ContextError("Workbook changed during generation; run the command again")
                 encoded = (
                     b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b""
                 ) + new_text.encode("utf-8")
@@ -452,7 +456,7 @@ def build_context(
                     },
                 )
                 result.update(status="written", imageCount=len(images), usagePath=str(usage_path))
-                logger.info("Sheet %s: context written to %s.", sheet["name"], note)
+                logger.info("Sheet %s: context generated.", sheet["name"])
 
         if include_overview:
             _build_overview(
@@ -468,20 +472,21 @@ def build_context(
                 dry_run=dry_run,
                 force=force,
                 preview_text=preview_text,
+                usage_root=usage_directory,
             )
 
     try:
         if dry_run:
             run()
         else:
-            with note_lock(note):
+            with note_lock(note, storage_root=runtime_root):
                 run()
     except Exception as exc:
         if results:
             results[-1].update(status="error", message=str(exc))
         else:
             results.append({"status": "error", "message": str(exc)})
-        logger.error("AI pull stopped: %s", exc)
+        logger.error("Context generation stopped: %s", exc)
     error = any(result["status"] == "error" for result in results)
     totals: dict[str, Any] = {"calls": len(records)}
     for field in ("inputTokens", "outputTokens", "cachedInputTokens", "reasoningTokens"):
@@ -567,6 +572,7 @@ def _build_overview(
     dry_run: bool,
     force: bool,
     preview_text: str | None,
+    usage_root: Path,
 ) -> None:
     original = note.read_bytes() if note.exists() else (preview_text or "").encode()
     text = original.decode("utf-8-sig")
@@ -639,7 +645,7 @@ def _build_overview(
             config,
             evidence,
             [],
-            state_root() / "context" / "usage" / f"{uuid.uuid4().hex}.json",
+            usage_root / f"{uuid.uuid4().hex}.json",
             logger,
             profile=connection,
             stage="workbook",
@@ -711,7 +717,7 @@ def _build_overview(
         "utf-8"
     )
     if read_shared(workbook) != data:
-        raise ContextError("Workbook changed during generation; run pull again")
+        raise ContextError("Workbook changed during generation; run the command again")
     if note.read_bytes() != original:
         raise ContextError(
             "Proxy note changed during generation; workbook overview was not applied"
@@ -751,6 +757,8 @@ def run_context(
     note_path: Path | None = None,
     preview_text: str | None = None,
     include_overview: bool = False,
+    storage_root: Path | None = None,
+    usage_root: Path | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     workbook = resolve_workbook(source, workbook_selector, config)
@@ -781,6 +789,8 @@ def run_context(
         note_path=note_path,
         preview_text=preview_text,
         include_overview=include_overview,
+        storage_root=storage_root,
+        usage_root=usage_root,
     )
     result["durationSeconds"] = round(time.monotonic() - started, 3)
     logger.info(

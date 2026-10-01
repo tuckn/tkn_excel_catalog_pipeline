@@ -52,9 +52,9 @@ tkn-excel-note pull --source workbooks
 `--cover sheet` は Windows のデスクトップ版 Excel で保存済みのシートを描画し、指定範囲を1枚の PNG にします。埋め込みサムネイルの有無に左右されません。AI 呼び出しや外部への画像送信はありません。
 
 ```shell
-tkn-excel-note pull "C:\path\to\book.xlsx" --cover sheet --dry-run
-tkn-excel-note pull "C:\path\to\book.xlsx" --cover sheet
-tkn-excel-note pull "C:\path\to\book.xlsx" --cover sheet --cover-sheet "概要" --cover-range "B2:R51" --cover-width 3000
+tkn-excel-note pull --source workbooks --cover sheet --dry-run
+tkn-excel-note pull --source workbooks --cover sheet
+tkn-excel-note pull --source workbooks --cover sheet --cover-sheet "概要" --cover-range "B2:R51" --cover-width 3000
 tkn-excel-note pull --source workbooks --cover sheet
 ```
 

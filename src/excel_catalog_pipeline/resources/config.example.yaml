@@ -30,7 +30,8 @@ sync:
   allow_source_rename: false
   max_extracted_text_chars: 12000
 
-# Optional `pull --context` uses GenAI Bridge. Plain pull remains local.
+# Optional `export --context` and `pull --source ID --context` use GenAI Bridge.
+# Plain export/pull remain local; export uses generation limits without source settings.
 # Connections/models/authentication: ~/.tkn/genai_bridge/config.yaml.
 # Evidence images live in the proxy note's sibling img/ directory.
 generation:

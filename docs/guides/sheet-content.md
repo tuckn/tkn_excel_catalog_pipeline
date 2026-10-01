@@ -2,7 +2,8 @@
 
 基本の使い方は [README](../../README.md) を参照してください。
 `pull --context` は、代理ノートの作成・メタデータ更新に加えてシートの画像解析とブック全体の説明を生成します。
-単体入力と設定済み source の一括処理は、同じノート形式・生成・再利用・保護処理を使います。
+単体・フォルダの独立した書き出しは `export --context`、設定済み source の同期は `pull --source ID --context` を使います。画像解析・profile・ブック要約の生成処理を共有します。
+`export` は同期記録を読まず、毎回全生成が成功してから Markdown を保存します。再利用用キャッシュは残しません。以下の再利用・蓄積・管理マーカーの説明は source の `pull` に適用されます。
 
 ## 準備と実行
 
@@ -33,12 +34,12 @@ generation:
 
 ```shell
 tkn-excel-note workbook list-sheets --workbook "C:\path\to\book.xlsx"
-tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --context --dry-run
-tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --context
+tkn-excel-note export "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --context --dry-run
+tkn-excel-note export "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --context
 ```
 
 初回のノート作成もこのコマンドが行うため、先に別のコマンドでノートを作る必要はありません。
-`--output` は既存ノートの移動先の指定ではありません。すでに対応するノートが記録されていれば、その場所を使います。
+`--output` 省略時は原本の隣に `book.xlsx.md` を保存します。既存ファイルの置き換えには `--force` が必要です。同期ノートの対応記録を使いません。フォルダ指定は配下を再帰探索し、各ブックの隣に出力します。
 
 ### 対象シートと言語
 
@@ -46,14 +47,15 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --
 `--sheet` は完全一致のシート名で繰り返し指定でき、非表示シートも名前を明示した場合に解析します。
 
 ```shell
-tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --sheet "Sheet2" --profile default-ja
+tkn-excel-note export "C:\path\to\book.xlsx" --context --sheet "Sheet1" --sheet "Sheet2" --profile default-ja
 ```
 
-`--sheet` は今回更新するシートの選択です。ブック要約には、更新後のノートにある全ての現存シートのcontextを使います。以前に取得した非表示シートも対象です。取得済みと未取得の一覧を本文・Frontmatterに残し、未取得シートが残る場合は `partial` とします。古い・未検証のcontextがあれば、その状態を優先して表示します。
+`export` の `--sheet` は今回説明を生成する範囲です。未選択シートの以前の説明は引き継ぎません。
+source の `pull` では、`--sheet` は今回更新するシートの選択です。ブック要約には、更新後のノートにある全ての現存シートのcontextを使います。以前に取得した非表示シートも対象です。取得済みと未取得の一覧を本文・Frontmatterに残し、未取得シートが残る場合は `partial` とします。古い・未検証のcontextがあれば、その状態を優先して表示します。
 設定した source の全ブックを処理する場合は `pull --source workbooks --context` とします。
 一括処理の `--sheet` は各ブックに同じ名前の選択を適用するため、名前が存在しないブックはエラーになります。
 
-## 生成・再利用・失敗時の扱い
+## source 同期での生成・再利用・失敗時の扱い
 
 1. Excel、ノート、同期記録を読み、対象シート、設定、既存の生成部分の編集保護を事前検証します。
 2. 同じ `pull` 処理で Frontmatter、シート一覧、抽出テキストを更新します。
@@ -113,7 +115,7 @@ Excel が必要なのは PDF 形式のためではなく、表示文字列やセ
 極端に離れた領域は座標付きの詳細画像にし、詳細領域が想定外に複数ページとなる場合は欠落を避けるため停止します。
 AI には領域を Z 字順に読み、矢印・色・配置を解釈するよう指示します。
 
-## 保存先と手動編集の保護
+## source 同期の保存先と手動編集の保護
 
 ブック全体の説明は `context-workbook`、各シートの説明は `context-<sheetId>` 管理セクションに保存します。
 Frontmatter のユーザー項目、管理マーカー外の文章は保持します。
@@ -122,6 +124,7 @@ Excel から削除されたシートの生成セクションは、`--context` �
 再生成して置き換える場合だけ `pull --context --force` を使います。関係のない既存 Markdown の上書きには使えません。
 生成中に Excel やノートの変更を検出した場合は、`--force` でも停止します。
 
+`export` も同じ画像配置を使いますが、同期用の管理マーカーは出力から取り除きます。
 画像と抽出根拠は、ノートと同階層の `img/` に保存します。
 
 ```text
@@ -217,8 +220,8 @@ generation:
 ```
 
 ```shell
-tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile technical-notes --dry-run
-tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile technical-notes
+tkn-excel-note export "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile technical-notes --dry-run
+tkn-excel-note export "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile technical-notes
 ```
 
 `profile_dirs` は設定順に探索し、最初に見つかった同名フォルダを使います。同名がなければ同梱profileを使います。不完全な上書きフォルダから不足ファイルだけを補完することはせず、エラーにします。相対パスは実行時の作業フォルダ基準です。profile名には小文字英数字・`-`・`_`・`.` が使え、先頭は英数字にします。廃止した `auto` は独自profile名としても使用できません。
@@ -283,3 +286,14 @@ generation:
 シートは取得順ではなくブック内の順に並べます。既存の `Extracted Text` は補助資料として保持し、Workbook Mapを管理本文の最後に置きます。管理マーカー外の文字列は保持します。
 
 旧形式で記録と本文が一致するブロックは、AIを呼ばずに見出しだけを階層化します。取り込み済みcontextの文章・表・画像参照・コード例は保持し、分からないprofileは「未記録」と表示します。旧本文からシート要約を推測して追加することはしません。選択外の手編集済み・記録のない旧ブロックは整形もせず保持するため、再生成までは旧見出しが混在する場合があります。取り込み済みcontextを新構成で再生成する場合のみ、対象シートを指定して `--force` を使います。
+
+## export の Frontmatter と抽出範囲
+
+独立した出力は `type: ExcelExport`、`schemaVersion: "1.0"` です。タイトル・作成者などの文書プロパティに加えて、`sourceFileName`（拡張子付きのファイル名）、`sourceFullPath`、`sourceSnapshotSha256`、`generatedAt`、`generationMethod` を記録します。
+`sourceId`・`noteId`・`sourceRoot` は付けず、`push` の対象にはしません。`--context` では共通の `contextStatus`・対象シート・生成日時も記録します。
+
+文字抽出は非表示ワークシートも対象です。セル位置・保存値・数式・図形の文字を出力し、数式は再計算しません。
+`sync.max_extracted_text_chars` で切り詰めません。`generation.max_workbook_mb`・シートごとの `max_cells`・`max_objects` を検証し、上限超過はエラーにして既存出力を保護します。
+チャートシートなど未対応のシートは Workbook Map と `unsupportedSheets` に記録し、取得した内容と区別します。
+
+`export --context` の使用量記録だけを `state/export/usage/` に残します。画像・`evidence.json` は出力の隣の `img/`、生成途中のデータは一時フォルダを使います。同期記録・context の再利用用状態は作りません。

@@ -186,7 +186,8 @@ sources:
             "--report-dir",
             str(tmp_path / "reports"),
             "pull",
-            "--all-sources",
+            "--source",
+            "example",
         ]
     )
     captured = capsys.readouterr()
@@ -233,7 +234,8 @@ sources:
             "--report-dir",
             str(reports),
             "pull",
-            "--all-sources",
+            "--source",
+            "example",
             "--dry-run",
         ]
     )
@@ -298,7 +300,7 @@ sources:
         ]
 
     monkeypatch.setattr(cli_module, "run_status", fake_run_status)
-    result = main(["--config", str(config), "--report-dir", str(tmp_path / "reports"), "status"])
+    result = main(["--config", str(config), "--report-dir", str(tmp_path / "reports"), "status", "--source", "example"])
     captured = capsys.readouterr()
 
     assert result == 0
@@ -386,6 +388,8 @@ sources:
             "--report-dir",
             str(tmp_path / "reports"),
             "push",
+            "--source",
+            "example",
         ]
     )
     captured = capsys.readouterr()
@@ -477,7 +481,8 @@ sources:
             "--report-dir",
             str(tmp_path / "reports"),
             "pull",
-            "--all-sources",
+            "--source",
+            "example",
             "--dry-run",
             "--prefer-source",
         ]
@@ -528,7 +533,8 @@ def test_legacy_write_option_is_accepted_with_deprecation_warning(
             "--report-dir",
             str(tmp_path / "reports"),
             "pull",
-            "--all-sources",
+            "--source",
+            "example",
             "--write-notes",
         ]
     )
@@ -569,6 +575,8 @@ def test_cli_push_dry_run_validates_allowed_rename_without_report(
             "--report-dir",
             str(tmp_path / "reports"),
             "push",
+            "--source",
+            "example",
             "--dry-run",
             "--allow-rename",
         ]
@@ -606,6 +614,8 @@ def test_cli_adopt_dry_run_lists_targets_without_report(
             "--report-dir",
             str(tmp_path / "reports"),
             "adopt",
+            "--source",
+            "example",
             "--dry-run",
         ]
     )
@@ -637,17 +647,18 @@ def test_config_show_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> No
 
 
 @pytest.mark.parametrize("options", [[], ["--context"], ["--dry-run"], ["--context", "--force"]])
-def test_pull_without_target_shows_help_before_config_or_execution(monkeypatch, capsys, options):
+def test_pull_requires_source_before_config_or_execution(monkeypatch, capsys, options):
     def forbidden(*args, **kwargs):
         raise AssertionError("No config, scanning, AI, or writes allowed")
 
     for name in ("load_config", "configure_logging", "run_pull", "run_ai_pull"):
         monkeypatch.setattr(cli_module, name, forbidden)
-    assert main(["--config", "missing.yaml", "pull", *options]) == 0
+    with pytest.raises(SystemExit) as failure:
+        main(["--config", "missing.yaml", "pull", *options])
+    assert failure.value.code == 2
     captured = capsys.readouterr()
-    assert "usage: tkn-excel-note pull" in captured.out
-    assert "--all-sources" in captured.out
-    assert not captured.err
+    assert "required: --source" in captured.err
+    assert not captured.out
 
 
 @pytest.mark.parametrize(
@@ -674,7 +685,6 @@ def test_pull_rejects_ambiguous_targets_before_loading(monkeypatch, capsys, opti
 @pytest.mark.parametrize(
     "target,expected",
     [
-        (["--all-sources"], ["one", "two"]),
         (["--source", "two"], ["two"]),
     ],
 )
@@ -715,7 +725,7 @@ def test_profile_auto_is_rejected_before_loading_config(monkeypatch, capsys):
 
     monkeypatch.setattr(cli_module, "load_config", unexpected_load)
     with pytest.raises(SystemExit) as failure:
-        main(["pull", "book.xlsx", "--context", "--profile", "auto"])
+        main(["export", "book.xlsx", "--context", "--profile", "auto"])
     assert failure.value.code == 2
     captured = capsys.readouterr()
     assert "auto' was removed" in captured.err

@@ -83,7 +83,7 @@ def run_ai_pull(
         enrich(action, True)
     if not write_notes or any(action.status == "generation-error" for action in planned):
         return planned
-    # Use the same metadata writer for both configured sources and a single pair.
+    # Use the same metadata writer for preview and application.
     actions = run_pull(config, sources, write_notes=True, preference=preference)
     for action in actions:
         enrich(action, False)
