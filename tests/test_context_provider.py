@@ -335,3 +335,47 @@ def test_custom_schema_and_template_are_used_by_bridge(setup_provider, monkeypat
     writing = load_context_profile(config)
     assert record["profileSha256"] == writing.sha256
     assert record["templateSha256"] == writing.template_sha256
+
+
+@pytest.mark.parametrize("stage", ["sheet", "workbook"])
+@pytest.mark.parametrize("writing_profile", ["default-ja", "default-en"])
+def test_bridge_receives_lower_authority_references_in_both_stages(
+    setup_provider, monkeypatch, stage, writing_profile
+):
+    from excel_catalog_pipeline.models import ReferenceInput
+
+    image, journal = setup_provider
+    config = ContextConfig(
+        prompt_profile=writing_profile,
+        generator_id="fixture-generator",
+        reference_inputs=(ReferenceInput("cli:text:1", "PRIVATE REFERENCE BODY"),),
+    )
+    evidence = (
+        {"sheet": "Data", "notes": [{"sheet": "Data", "text": "Workbook source"}]}
+        if stage == "workbook"
+        else {"sheet": "Data"}
+    )
+
+    def run(command, prompt, *args, **kwargs):
+        assert "authoritative source" in prompt and "prefer the source" in prompt
+        reference = prompt.split("SUPPLEMENTARY REFERENCE (JSON):\n", 1)[1].split(
+            "\nSOURCE EVIDENCE (JSON):\n", 1
+        )[0]
+        assert json.loads(reference) == [{"origin": "cli:text:1", "text": "PRIVATE REFERENCE BODY"}]
+        assert json.loads(prompt.split("SOURCE EVIDENCE (JSON):\n", 1)[1]) == evidence
+        values = {"summary": "Source-grounded summary", "uncertainties": []}
+        if stage == "sheet":
+            values.update(conclusion=None, key_points=[], sections=[])
+        Path(command[command.index("--output-last-message") + 1]).write_text(json.dumps(values))
+        return '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":3}}'
+
+    monkeypatch.setattr(cli, "run_process", run)
+    result = provider.generate_markdown(
+        config, evidence, [image] if stage == "sheet" else [], journal, LOGGER, stage=stage
+    )
+    assert "Source-grounded summary" in result
+    record = json.loads(journal.read_text())
+    assert record["generator"] == "fixture-generator"
+    assert record["reference"]["count"] == 1 and record["reference"]["chars"] == 22
+    assert len(record["reference"]["sha256"]) == 64
+    assert "PRIVATE REFERENCE BODY" not in journal.read_text()

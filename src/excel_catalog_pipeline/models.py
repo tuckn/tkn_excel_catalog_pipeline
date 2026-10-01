@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -43,6 +43,32 @@ def _canonical_terms(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class ReferenceConfig:
+    text: str = ""
+    files: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SourceGenerationConfig:
+    generator: str | None = None
+    reference: ReferenceConfig = field(default_factory=ReferenceConfig)
+
+
+@dataclass(frozen=True)
+class GeneratorConfig:
+    bridge_profile: str = "codex-default"
+    prompt_profile: str = "default-ja"
+    overrides: dict[str, Any] = field(default_factory=dict)
+    reference: ReferenceConfig = field(default_factory=ReferenceConfig)
+
+
+@dataclass(frozen=True)
+class ReferenceInput:
+    origin: str
+    text: str
+
+
+@dataclass(frozen=True)
 class SourceConfig:
     id: str
     path: Path
@@ -55,6 +81,7 @@ class SourceConfig:
     rename_adapter: str = "report-only"
     single_workbook: Path | None = None
     single_note: Path | None = None
+    generation: SourceGenerationConfig = field(default_factory=SourceGenerationConfig)
 
 
 @dataclass(frozen=True)
@@ -81,6 +108,10 @@ class ContextConfig:
     max_objects: int = 10000
     max_input_chars: int | None = None
     max_workbook_mb: int = 100
+    max_reference_chars: int = 20000
+    # Resolved invocation data, excluded from persisted configuration.
+    generator_id: str | None = None
+    reference_inputs: tuple[ReferenceInput, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -100,6 +131,17 @@ class AppConfig:
     loaded_files: tuple[Path, ...] = ()
     context: ContextConfig = field(default_factory=ContextConfig)
     cover: CoverConfig = field(default_factory=CoverConfig)
+    default_generator: str | None = None
+    generators: dict[str, GeneratorConfig] = field(default_factory=dict)
+
+
+def context_settings(config: ContextConfig) -> dict[str, Any]:
+    """Only user-configurable shared settings, without invocation data."""
+    return {
+        key: value
+        for key, value in asdict(config).items()
+        if key not in {"generator_id", "reference_inputs"}
+    }
 
 
 @dataclass

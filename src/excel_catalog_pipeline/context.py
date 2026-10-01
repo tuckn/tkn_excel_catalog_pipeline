@@ -35,6 +35,7 @@ from .context_provider import (
 from .context_render import render_sheet
 from .context_source import ContextError, extract_sheet, rendering_snapshot, sheet_list
 from .discovery import is_source_path_in_scope
+from .generation import reference_provenance
 from .models import ContextConfig, SourceConfig
 from .note_layout import patch_frontmatter
 from .paths import state_root
@@ -141,7 +142,12 @@ def _assets_intact(note: Path, state: dict[str, Any]) -> bool:
 @contextmanager
 def note_lock(note: Path, *, storage_root: Path | None = None) -> Iterator[None]:
     # A persistent lock left by an abruptly killed process is intentionally not stolen.
-    location = (storage_root or state_root()) / "context" / "locks" / (digest(str(note.resolve()).encode()) + ".lock")
+    location = (
+        (storage_root or state_root())
+        / "context"
+        / "locks"
+        / (digest(str(note.resolve()).encode()) + ".lock")
+    )
     location.parent.mkdir(parents=True, exist_ok=True)
     try:
         stream = location.open("x", encoding="utf-8")
@@ -312,6 +318,8 @@ def build_context(
                 connection = resolve_profile(config)
                 plan = generation_plan(connection, config=config)
             result["bridgePlan"] = plan
+            result["generator"] = config.generator_id
+            result["reference"] = reference_provenance(config)
             key = digest(
                 json.dumps(
                     {
@@ -319,7 +327,14 @@ def build_context(
                         "config": {
                             k: v
                             for k, v in asdict(config).items()
-                            if k not in {"bridge_profile", "overrides", "profile_dirs"}
+                            if k
+                            not in {
+                                "bridge_profile",
+                                "overrides",
+                                "profile_dirs",
+                                "reference_inputs",
+                                "generator_id",
+                            }
                         },
                         "bridge": {
                             k: plan[k]
@@ -330,6 +345,7 @@ def build_context(
                             )
                         },
                         "contextProfileSha256": writing.sha256,
+                        "referenceSha256": reference_provenance(config)["sha256"],
                     },
                     sort_keys=True,
                 ).encode()
@@ -449,6 +465,8 @@ def build_context(
                         "snapshotSha256": digest(data),
                         "sourceFingerprint": evidence["fingerprint"],
                         "layoutVersion": 1,
+                        "generator": config.generator_id,
+                        "reference": reference_provenance(config),
                         **writing.provenance(),
                         "sheet": sheet["name"],
                         "usagePath": str(usage_path),
@@ -610,6 +628,8 @@ def _build_overview(
     needs_sheets = any(item["status"] == "planned" for item in results)
     result: dict[str, Any] = {"kind": "workbook", "status": "planned", "notePath": str(note)}
     result["removedSheetIds"] = removed_ids
+    result["generator"] = config.generator_id
+    result["reference"] = reference_provenance(config)
     results.append(result)
     # Validate existing blocks and all profiles even on the first dry-run.
     text, notes, migrations = _collect_context(text, note, data, config, state_dir)
@@ -630,6 +650,7 @@ def _build_overview(
             {
                 "evidence": evidence,
                 "profileSha256": writing.sha256,
+                "referenceSha256": reference_provenance(config)["sha256"],
                 "bridge": plan,
             },
             sort_keys=True,
@@ -687,6 +708,8 @@ def _build_overview(
             "buildKey": key,
             "blockSha256": digest(block.replace("\r\n", "\n").encode()),
             "generatedAt": utc_now(),
+            "generator": config.generator_id,
+            "reference": reference_provenance(config),
             **writing.provenance(),
         }
         result["status"] = "written"

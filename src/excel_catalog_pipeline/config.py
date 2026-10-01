@@ -21,17 +21,25 @@ from .models import (
     ContextConfig,
     CoverConfig,
     FrontmatterTermFormat,
+    GeneratorConfig,
+    ReferenceConfig,
     SourceConfig,
+    SourceGenerationConfig,
     SyncConfig,
+    context_settings,
 )
 from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
-SCHEMA_VERSION = "2.0.0"
+SCHEMA_VERSION = "2.1.0"
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
     "sources": {},
-    "generation": asdict(ContextConfig()),
+    "generation": {
+        **context_settings(ContextConfig()),
+        "default_generator": None,
+        "generators": {},
+    },
     "cover": asdict(CoverConfig()),
     "sync": {
         "pull_preserves_user_metadata": True,
@@ -43,7 +51,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 TOP_LEVEL_KEYS = {"schema_version", "sources", "sync", "generation", "cover"}
 SYNC_KEYS = set(DEFAULT_CONFIG["sync"])
-SOURCE_KEYS = {"id", "workbooks_dir", "recursive", "include", "ignore", "notes"}
+SOURCE_KEYS = {"id", "workbooks_dir", "recursive", "include", "ignore", "notes", "generation"}
 NOTES_KEYS = {"dir", "profile", "frontmatter_term_format", "rename_adapter"}
 FRONTMATTER_TERM_FORMATS = {"obsidian-link", "plain"}
 
@@ -155,39 +163,100 @@ def init_user_config(*, force: bool = False, target: Path | None = None) -> tupl
     return status, destination
 
 
-def _generation_settings(raw: dict[str, Any]) -> dict[str, Any]:
+def _name(value: Any, where: str, *, optional: bool = False) -> str | None:
+    if optional and value is None:
+        return None
+    if not isinstance(value, str) or re.fullmatch(r"[a-z0-9][a-z0-9._-]*", value) is None:
+        raise ConfigError(
+            f"{where} must be a non-empty name using lowercase letters, digits, ., _, -"
+        )
+    return value
+
+
+def _reference_settings(raw: Any, where: str, *, base_dir: Path | None = None) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} must be a mapping")
+    _reject_unknown(raw, {"text", "files"}, where)
+    text = raw.get("text", "")
+    paths = raw.get("files", [])
+    if not isinstance(text, str):
+        raise ConfigError(f"{where}.text must be a string")
+    if not isinstance(paths, (list, tuple)) or any(
+        not isinstance(item, str) or not item.strip() for item in paths
+    ):
+        raise ConfigError(f"{where}.files must be a list of file paths")
+    if base_dir is not None:
+        resolved = []
+        for item in paths:
+            path = Path(item).expanduser()
+            resolved.append(str((path if path.is_absolute() else base_dir / path).resolve()))
+        paths = resolved
+    return {"text": text, "files": paths}
+
+
+def _source_generation(raw: Any, where: str) -> SourceGenerationConfig:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} must be a mapping")
+    _reject_unknown(raw, {"generator", "reference"}, where)
+    reference = _reference_settings(raw.get("reference", {}), f"{where}.reference")
+    return SourceGenerationConfig(
+        generator=_name(raw.get("generator"), f"{where}.generator", optional=True),
+        reference=ReferenceConfig(text=reference["text"], files=tuple(reference["files"])),
+    )
+
+
+def _generation_settings(raw: dict[str, Any], where: str = "generation") -> dict[str, Any]:
     """Validate generation settings and reject retired options in each layer."""
     values = deepcopy(raw)
     if "language" in values or values.get("prompt_profile") == "auto":
         name = values.get("prompt_profile")
         language = values.get("language", "Japanese")
         if isinstance(name, str) and name.strip() and name != "auto":
-            migration = f"keep generation.prompt_profile: {name}"
+            migration = f"keep {where}.prompt_profile: {name}"
         elif isinstance(language, str) and language.lower() in {"english", "en"}:
-            migration = "set generation.prompt_profile: default-en"
+            migration = f"set {where}.prompt_profile: default-en"
         elif isinstance(language, str) and language.lower() in {"japanese", "ja"}:
-            migration = "set generation.prompt_profile: default-ja"
+            migration = f"set {where}.prompt_profile: default-ja"
         else:
             migration = (
-                "select a custom generation.prompt_profile with the intended template language"
+                f"select a custom {where}.prompt_profile with the intended template language"
             )
         raise ConfigError(
-            "generation.language and generation.prompt_profile: auto were removed; "
-            f"remove generation.language and {migration}. "
+            f"{where}.language and {where}.prompt_profile: auto were removed; "
+            f"remove {where}.language and {migration}. "
             "Language is defined by the selected profile templates."
         )
     overrides = values.get("overrides", {})
     if not isinstance(overrides, dict):
-        raise ConfigError("generation.overrides must be a mapping")
+        raise ConfigError(f"{where}.overrides must be a mapping")
     for key, value in overrides.items():
         field = Profile.model_fields.get(key)
         if field is None:
-            raise ConfigError(f"Unknown generation.overrides key: {key}")
+            raise ConfigError(f"Unknown {where}.overrides key: {key}")
         try:
             TypeAdapter(field.rebuild_annotation()).validate_python(value, strict=True)
         except ValidationError:
-            raise ConfigError(f"Invalid generation.overrides.{key}") from None
+            raise ConfigError(f"Invalid {where}.overrides.{key}") from None
     values["overrides"] = overrides
+    if "generators" in values:
+        generators = values["generators"]
+        if not isinstance(generators, dict):
+            raise ConfigError("generation.generators must be a mapping")
+        for name, spec in list(generators.items()):
+            _name(name, "generation.generators key")
+            location = f"generation.generators.{name}"
+            if not isinstance(spec, dict):
+                raise ConfigError(f"{location} must be a mapping")
+            # Retired options must fail even when a higher layer replaces them.
+            spec = _generation_settings(spec, location)
+            _reject_unknown(
+                spec, {"bridge_profile", "prompt_profile", "overrides", "reference"}, location
+            )
+            if "reference" in spec:
+                original_reference = spec["reference"]
+                checked = _reference_settings(original_reference, f"{location}.reference")
+                spec["reference"] = {key: checked[key] for key in original_reference}
+            generators[name] = spec
     return values
 
 
@@ -225,7 +294,7 @@ def _path_value(value: Any, field: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
-def _normalize_layer(data: dict[str, Any]) -> dict[str, Any]:
+def _normalize_layer(data: dict[str, Any], *, base_dir: Path | None = None) -> dict[str, Any]:
     """Validate each version before merging config layers."""
     values = deepcopy(data)
     _reject_unknown(values, TOP_LEVEL_KEYS, "top-level")
@@ -253,6 +322,13 @@ def _normalize_layer(data: dict[str, Any]) -> dict[str, Any]:
                 if "workbooks_dir" in item:
                     raise ConfigError("Do not mix path and workbooks_dir in one source")
                 item["workbooks_dir"] = item.pop("path")
+            if "generation" in item:
+                generation = item["generation"]
+                _source_generation(generation, "source.generation")
+                if "reference" in generation:
+                    generation["reference"] = _reference_settings(
+                        generation["reference"], "source.generation.reference", base_dir=base_dir
+                    )
             notes = item.get("notes")
             if isinstance(notes, dict) and "root" in notes:
                 if "dir" in notes:
@@ -262,6 +338,13 @@ def _normalize_layer(data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(values["generation"], dict):
             raise ConfigError("generation must be a mapping")
         values["generation"] = _generation_settings(values["generation"])
+        for name, spec in values["generation"].get("generators", {}).items():
+            if "reference" in spec:
+                original_reference = spec["reference"]
+                checked = _reference_settings(
+                    original_reference, f"generation.generators.{name}.reference", base_dir=base_dir
+                )
+                spec["reference"] = {key: checked[key] for key in original_reference}
     return values
 
 
@@ -275,8 +358,8 @@ def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> App
     loaded: list[Path] = []
     for path in candidates:
         if path.exists():
-            layer = _normalize_layer(_read_yaml(path))
-            validate_config(_deep_merge(DEFAULT_CONFIG, layer))
+            layer = _normalize_layer(_read_yaml(path), base_dir=path.parent)
+            validate_config(_deep_merge(DEFAULT_CONFIG, layer), check_generator_links=False)
             merged = _deep_merge(merged, layer)
             loaded.append(path)
         elif explicit is not None and path == explicit.expanduser().resolve():
@@ -285,7 +368,9 @@ def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> App
     return validate_config(merged, loaded_files=tuple(loaded))
 
 
-def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()) -> AppConfig:
+def validate_config(
+    data: dict[str, Any], *, loaded_files: tuple[Path, ...] = (), check_generator_links: bool = True
+) -> AppConfig:
     data = _normalize_layer(data)
     try:
         cover = validate_cover(data.get("cover", {}))
@@ -358,13 +443,39 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
                 profile=profile,
                 frontmatter_term_format=cast(FrontmatterTermFormat, frontmatter_term_format),
                 rename_adapter=str(notes.get("rename_adapter", "report-only")),
+                generation=_source_generation(item.get("generation", {}), f"{where}.generation"),
             )
         )
     context_raw = data.get("generation", {})
     if not isinstance(context_raw, dict):
         raise ConfigError("generation must be a mapping")
     context_raw = _generation_settings(context_raw)
-    defaults = asdict(ContextConfig())
+    generator_raw = context_raw.pop("generators", {})
+    default_generator = _name(
+        context_raw.pop("default_generator", None), "generation.default_generator", optional=True
+    )
+    generators: dict[str, GeneratorConfig] = {}
+    for name, spec in generator_raw.items():
+        where = f"generation.generators.{name}"
+        settings = {**asdict(GeneratorConfig()), **spec}
+        for key in ("bridge_profile", "prompt_profile"):
+            if not isinstance(settings[key], str) or not settings[key].strip():
+                raise ConfigError(f"{where}.{key} must be a non-empty string")
+        _name(settings["prompt_profile"], f"{where}.prompt_profile")
+        reference = _reference_settings(settings.pop("reference"), f"{where}.reference")
+        generators[name] = GeneratorConfig(
+            **settings,
+            reference=ReferenceConfig(text=reference["text"], files=tuple(reference["files"])),
+        )
+    if check_generator_links:
+        selections = [("generation.default_generator", default_generator)] + [
+            (f"sources.{source.id}.generation.generator", source.generation.generator)
+            for source in sources
+        ]
+        for where, selected_generator in selections:
+            if selected_generator is not None and selected_generator not in generators:
+                raise ConfigError(f"{where}: unknown generator: {selected_generator}")
+    defaults = context_settings(ContextConfig())
     _reject_unknown(context_raw, set(defaults), "generation")
     context_values = {**defaults, **context_raw}
     for name, default in defaults.items():
@@ -406,6 +517,8 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         loaded_files=loaded_files,
         context=ContextConfig(**context_values),
         cover=cover,
+        default_generator=default_generator,
+        generators=generators,
     )
 
 
@@ -427,6 +540,7 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
                 "recursive": source.recursive,
                 "include": list(source.include),
                 "ignore": list(source.ignore),
+                "generation": asdict(source.generation),
                 "notes": {
                     "dir": str(source.note_root),
                     "profile": source.profile,
@@ -443,7 +557,11 @@ def config_as_dict(config: AppConfig) -> dict[str, Any]:
             "allow_source_rename": config.sync.allow_source_rename,
             "max_extracted_text_chars": config.sync.max_extracted_text_chars,
         },
-        "generation": asdict(config.context),
+        "generation": {
+            **context_settings(config.context),
+            "default_generator": config.default_generator,
+            "generators": {name: asdict(spec) for name, spec in config.generators.items()},
+        },
         "cover": asdict(config.cover),
         "loadedConfigFiles": [str(path) for path in config.loaded_files],
     }

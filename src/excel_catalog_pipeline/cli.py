@@ -88,6 +88,55 @@ def _context_profile_name(value: str) -> str:
     return value
 
 
+def _add_generation_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--generator",
+        help="Named generation settings; CLI > source > generation.default_generator. Requires --context.",
+    )
+    parser.add_argument(
+        "--reference",
+        action="append",
+        default=[],
+        help="Supplementary background text, repeatable; workbook evidence takes precedence. Requires --context.",
+    )
+    parser.add_argument(
+        "--reference-file",
+        type=Path,
+        action="append",
+        default=[],
+        help="UTF-8 supplementary reference file, repeatable and combinable with --reference. Requires --context.",
+    )
+    parser.add_argument(
+        "--no-reference",
+        action="store_true",
+        help="Disable all references for this invocation. Requires --context; cannot combine with reference inputs.",
+    )
+
+
+def _generation_arguments(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "generator": args.generator,
+        "prompt_profile": args.profile,
+        "reference_texts": tuple(args.reference),
+        "reference_files": tuple(args.reference_file),
+        "no_reference": args.no_reference,
+    }
+
+
+def _check_generation_options(args: argparse.Namespace) -> None:
+    if not args.context and (
+        args.sheet
+        or args.profile
+        or args.generator is not None
+        or args.reference
+        or args.reference_file
+        or args.no_reference
+    ):
+        raise ConfigError("--sheet, --profile, --generator and reference options require --context")
+    if args.no_reference and (args.reference or args.reference_file):
+        raise ConfigError("--no-reference cannot be combined with --reference or --reference-file")
+
+
 def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--source", required=True, help="Process one configured source id (required)."
@@ -221,6 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="With --context, regenerate and intentionally replace edited generated sections.",
     )
+    _add_generation_options(pull)
     _add_common(pull)
     _add_execution_mode(pull, legacy_write_option="--write-notes")
     _add_preference(pull)
@@ -265,6 +315,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Replace an existing Markdown after complete generation; previous assets are kept.",
     )
+
+    _add_generation_options(export)
 
     push = commands.add_parser(
         "push",
@@ -654,12 +706,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "export":
-            if not args.context and (args.sheet or args.profile):
-                raise ConfigError("--sheet and --profile require --context")
-            if args.profile:
-                config = replace(
-                    config, context=replace(config.context, prompt_profile=args.profile)
-                )
+            _check_generation_options(args)
             if args.report_dir is not None:
                 logger.warning(
                     "--report-dir does not apply to export; export does not save synchronization reports."
@@ -673,6 +720,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 force=args.force,
                 logger=logger,
+                **_generation_arguments(args),
             )
             _emit(result)
             return _exit_code(result)
@@ -697,12 +745,9 @@ def main(argv: list[str] | None = None) -> int:
                 raise ConfigError(
                     "--cover-sheet, --cover-range and --cover-width require sheet mode"
                 )
-            if not args.context and (args.sheet or args.profile or args.force):
-                raise ConfigError("--sheet, --profile and --force require --context")
-            if args.profile:
-                config = replace(
-                    config, context=replace(config.context, prompt_profile=args.profile)
-                )
+            _check_generation_options(args)
+            if not args.context and args.force:
+                raise ConfigError("--force requires --context")
         sources: tuple[SourceConfig, ...]
         if args.command == "workbook" and not args.source:
             selected_workbook = Path(args.workbook).expanduser().resolve()
@@ -761,6 +806,7 @@ def main(argv: list[str] | None = None) -> int:
                     sheet_names=args.sheet,
                     force=args.force,
                     logger=logger,
+                    **_generation_arguments(args),
                 )
             else:
                 actions = run_pull(

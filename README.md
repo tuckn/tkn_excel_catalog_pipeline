@@ -77,6 +77,24 @@ tkn-excel-note export "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profil
 生成した説明には解釈が含まれます。重要な箇所は元シートと見比べてください。未保存の編集は読み取りません。
 [本文構成・profile・抽出上限](docs/guides/sheet-content.md)も参照してください。
 
+## 補足文を添えて説明を生成する
+
+背景や用語の補足を、直接の文章と UTF-8 ファイルで指定できます。両方を併用でき、繰り返し指定も可能です。
+
+```powershell
+tkn-excel-note export "C:\path\to\book.xlsx" --context `
+  --reference "このブックは移行方式の比較検討メモです。" `
+  --reference-file "C:\path\to\background.md"
+```
+
+Excel の記載を優先し、補足文だけにある事実や結論をブックの記載として扱わないよう指示します。
+補足文はシート説明とブック要約の両方に渡します。`--no-reference` は設定を含むすべての補足を無効にします。
+これらのオプションには `--context` が必要です。
+
+接続先・文章のprofile・共通補足は `generation.generators.<id>` に保存し、`--generator <id>` で選べます。
+source 固有の背景は `sources.<id>.generation.reference` に置けます。
+[設定例と選択順](docs/reference/configuration.md#名前付きgeneratorと補足文)を参照してください。
+
 ## 設定したフォルダを継続的に同期する
 
 `source` は、Excel の入力フォルダと代理ノートの保存先を組にした同期対象です。
@@ -93,7 +111,7 @@ tkn-excel-note config show
 既存の設定は `--force` を付けない限り置き換えません。
 
 ```yaml
-schema_version: "2.0.0"
+schema_version: "2.1.0"
 sources:
   workbooks:
     workbooks_dir: 'C:\path\to\workbooks'
@@ -131,7 +149,8 @@ Excel を保存した後、同じコマンドを実行します。
 tkn-excel-note pull --source workbooks --context
 ```
 
-内容・生成条件が変わっていないシートの説明と画像は再利用します。
+内容・生成条件・補足文が変わっていないシートの説明と画像は再利用します。
+補足ファイルはパスだけでなく内容で変更を判定します。
 ブック全体の説明も、材料となるシート説明や生成条件が同じなら再利用します。
 初回の AI 呼び出しは選択シート数 + 1 回、全結果を再利用できる場合は 0 回です。
 
@@ -237,6 +256,8 @@ tkn-excel-note --version
 ```
 
 製品・配布名を `tkn-excel-note`、リポジトリ名を `tkn_excel_note` に変更しました。
+3.1.0では名前付きgeneratorと補足文を追加しました。旧 `generation.bridge_profile` / `prompt_profile` / `overrides` は引き続き使え、設定ファイルを自動変更しません。更新後は `uv tool install . --reinstall` でインストール済みCLIを更新してください。
+
 3.0.0では、単体・フォルダの書き出しを `export` に分離しました。旧単体 `pull <workbook>` は `export <workbook>` へ変更してください。
 同期は設定済み source を対象にし、`pull` / `push` / `status` / `adopt` / `delete-notes` に `--source ID` が必須です。`--all-sources` は廃止しました。旧 `context build` の別名は提供しません。
 新 CLI の動作確認後、旧ツール環境があれば削除できます。

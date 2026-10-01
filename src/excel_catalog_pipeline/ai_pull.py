@@ -9,6 +9,7 @@ from typing import Any
 from .adapters.markdown import read_note, render_note
 from .adapters.ooxml import inspect_workbook
 from .context import run_context
+from .generation import resolve_generation
 from .models import Action, AppConfig, SourceConfig
 from .pipeline import run_pull
 
@@ -32,7 +33,24 @@ def run_ai_pull(
     sheet_names: list[str],
     force: bool,
     logger: logging.Logger,
+    generator: str | None = None,
+    prompt_profile: str | None = None,
+    reference_texts: tuple[str, ...] = (),
+    reference_files: tuple[Path, ...] = (),
+    no_reference: bool = False,
 ) -> list[Action]:
+    contexts = {
+        source.id: resolve_generation(
+            config,
+            source,
+            generator=generator,
+            prompt_profile=prompt_profile,
+            reference_texts=reference_texts,
+            reference_files=reference_files,
+            no_reference=no_reference,
+        )
+        for source in sources
+    }
     planned = run_pull(config, sources, write_notes=False, preference=preference)
     by_id = {source.id: source for source in sources}
 
@@ -49,7 +67,7 @@ def run_ai_pull(
             preview = render_note(info, source, existing=read_note(note) if note.exists() else None)
             result = run_context(
                 source,
-                config.context,
+                contexts[source.id],
                 workbook_selector=str(workbook),
                 sheet_names=sheet_names,
                 all_sheets=not sheet_names,

@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from .config import ConfigError
 from .context import run_context
 from .context_provider import utc_now
 from .context_source import ContextError, extract_sheet, sheet_list
+from .generation import resolve_generation
 from .models import Action, AppConfig, SourceConfig, WorkbookInfo
 from .note_yaml import SourcePathDumper
 from .paths import state_root
@@ -252,7 +254,24 @@ def run_export(
     dry_run: bool,
     force: bool,
     logger: logging.Logger,
+    generator: str | None = None,
+    prompt_profile: str | None = None,
+    reference_texts: tuple[str, ...] = (),
+    reference_files: tuple[Path, ...] = (),
+    no_reference: bool = False,
 ) -> dict[str, Any]:
+    if with_context:
+        config = replace(
+            config,
+            context=resolve_generation(
+                config,
+                generator=generator,
+                prompt_profile=prompt_profile,
+                reference_texts=reference_texts,
+                reference_files=reference_files,
+                no_reference=no_reference,
+            ),
+        )
     pairs = _targets(input_path, output)
     actions: list[Action] = []
     for book, target in pairs:

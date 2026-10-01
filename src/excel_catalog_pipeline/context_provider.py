@@ -24,6 +24,7 @@ from tkn_genai_bridge import (
 
 from .context_profiles import load_context_profile, render_context
 from .context_source import ContextError
+from .generation import reference_prompt, reference_provenance
 from .models import ContextConfig
 
 TOKEN_FIELDS = {
@@ -109,7 +110,7 @@ def generation_plan(
         with Runtime(profile) as runtime:
             plan = runtime.plan(
                 GenerationRequest(
-                    prompt=writing.prompt,
+                    prompt=reference_prompt(writing.prompt, config or ContextConfig()),
                     output_schema=writing.schema,
                     schema_name=writing.schema_name,
                 ),
@@ -196,7 +197,7 @@ def generate_markdown(
     if (stage == "sheet" and not images) or len(images) > config.max_images:
         raise ContextError("Sheet generation requires between 1 and generation.max_images images")
     writing = load_context_profile(config, stage=stage)
-    prompt = writing.prompt + "\nSOURCE EVIDENCE (JSON):\n" + payload
+    prompt = reference_prompt(writing.prompt, config) + "\nSOURCE EVIDENCE (JSON):\n" + payload
     try:
         request = GenerationRequest(
             prompt=prompt,
@@ -226,6 +227,8 @@ def generate_markdown(
         "ordinaryEvidenceChars": ordinary_chars,
         "evidenceEncoding": "column-tables" if compact else "ordinary-json",
         "promptVersion": writing.version,
+        "generator": config.generator_id,
+        "reference": reference_provenance(config),
         **writing.provenance(),
         **usage_fields(Usage()),
     }

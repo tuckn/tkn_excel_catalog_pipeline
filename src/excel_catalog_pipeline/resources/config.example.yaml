@@ -1,4 +1,4 @@
-schema_version: "2.0.0"
+schema_version: "2.1.0"
 
 sources:
   personal-excel:
@@ -35,21 +35,32 @@ sync:
 # Connections/models/authentication: ~/.tkn/genai_bridge/config.yaml.
 # Evidence images live in the proxy note's sibling img/ directory.
 generation:
-  # Context profile bundle: built-in default-ja/default-en or a custom directory name.
-  # The selected profile templates define the generation language and headings.
-  # Default: default-ja (Japanese). Select default-en for English.
-  prompt_profile: default-ja
+  # Reusable generation settings. CLI --generator > source generation.generator > this default.
+  default_generator: my-codex-def
+  generators:
+    my-codex-def:
+      bridge_profile: codex-default
+      # Templates define the language and structure; use default-en for English.
+      prompt_profile: default-ja
+      overrides: {}
+      # Background only: workbook evidence always takes precedence.
+      reference:
+        text: ""
+        files: []  # UTF-8 files; relative paths are based on this config.yaml.
+    my-codex-en:
+      bridge_profile: codex-default
+      prompt_profile: default-en
 
-  # Ordered parent directories containing custom profile folders; first match wins.
+  # Optional source-specific settings under sources.<id>.generation:
+  # generation:
+  #   generator: my-codex-def
+  #   reference:
+  #     text: "Background for this source."
+  #     files: [./references/source-background.md]
+
+  # Ordered parent directories for writing profiles (resolved from the working directory).
   profile_dirs: []
-
-  # Select an image-capable model in the shared profile.
-  # Examples: claude-default, copilot-default, antigravity-default, local-vision, azure-quality.
-  bridge_profile: codex-default
-  overrides: {}
-  # Example per-application override:
-  # overrides:
-  #   timeout_seconds: 600
+  max_reference_chars: 20000  # Total reference text per invocation; never truncated.
   max_images: 24
   tile_width_points: 1200
   tile_height_points: 800
@@ -57,5 +68,5 @@ generation:
   image_dpi: 150
   max_cells: 10000
   max_objects: 10000
-  max_input_chars: null  # Optional CLI limit on evidence JSON characters, excluding image bytes
+  max_input_chars: null  # Evidence JSON limit, separate from supplementary references.
   max_workbook_mb: 100
