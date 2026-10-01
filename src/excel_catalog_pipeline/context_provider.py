@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
@@ -23,7 +22,7 @@ from tkn_genai_bridge import (
     load_profile,
 )
 
-from .context_profiles import load_prompt, profile_name
+from .context_profiles import load_context_profile, render_context
 from .context_source import ContextError
 from .models import ContextConfig
 
@@ -34,14 +33,6 @@ TOKEN_FIELDS = {
     "reasoningTokens": "reasoning_tokens",
     "cacheWriteTokens": "cache_write_tokens",
 }
-PROMPT_VERSION = "3"
-SCHEMA = {
-    "type": "object",
-    "properties": {"markdown": {"type": "string", "minLength": 1}},
-    "required": ["markdown"],
-    "additionalProperties": False,
-}
-SCHEMA_NAME = "excel_sheet_context"
 
 
 def evidence_payload(evidence: dict[str, Any], max_chars: int | None) -> tuple[str, int, bool]:
@@ -51,7 +42,11 @@ def evidence_payload(evidence: dict[str, Any], max_chars: int | None) -> tuple[s
     converted = False
     for key in ("cells", "objects", "nativeShapes"):
         items = compact.get(key)
-        if not isinstance(items, list) or not items or not all(isinstance(item, dict) for item in items):
+        if (
+            not isinstance(items, list)
+            or not items
+            or not all(isinstance(item, dict) for item in items)
+        ):
             continue
         columns = list(dict.fromkeys(field for item in items for field in item))
         compact[key] = {
@@ -101,13 +96,22 @@ def resolve_profile(config: ContextConfig) -> Profile:
     return profile
 
 
-def generation_plan(profile: Profile, *, check_executable: bool = False) -> dict[str, Any]:
+def generation_plan(
+    profile: Profile,
+    *,
+    config: ContextConfig | None = None,
+    stage: str = "sheet",
+    check_executable: bool = False,
+) -> dict[str, Any]:
     """Plan settings only; images do not exist yet, so omit token/cost estimates."""
+    writing = load_context_profile(config or ContextConfig(), stage=stage)
     try:
         with Runtime(profile) as runtime:
             plan = runtime.plan(
                 GenerationRequest(
-                    prompt="Sheet context", output_schema=SCHEMA, schema_name=SCHEMA_NAME
+                    prompt=writing.prompt,
+                    output_schema=writing.schema,
+                    schema_name=writing.schema_name,
                 ),
                 check_executable=check_executable,
             )
@@ -191,12 +195,13 @@ def generate_markdown(
     )
     if (stage == "sheet" and not images) or len(images) > config.max_images:
         raise ContextError("Sheet generation requires between 1 and generation.max_images images")
-    prompt = load_prompt(config, stage=stage) + "\nSOURCE EVIDENCE (JSON):\n" + payload
+    writing = load_context_profile(config, stage=stage)
+    prompt = writing.prompt + "\nSOURCE EVIDENCE (JSON):\n" + payload
     try:
         request = GenerationRequest(
             prompt=prompt,
-            output_schema=SCHEMA,
-            schema_name=SCHEMA_NAME,
+            output_schema=writing.schema,
+            schema_name=writing.schema_name,
             images=[ImageInput.from_file(path) for path in images],
         )
         with Runtime(connection) as runtime:
@@ -220,9 +225,8 @@ def generate_markdown(
         "evidenceChars": len(payload),
         "ordinaryEvidenceChars": ordinary_chars,
         "evidenceEncoding": "column-tables" if compact else "ordinary-json",
-        "promptVersion": PROMPT_VERSION,
-        "promptProfile": profile_name(config),
-        "promptSha256": hashlib.sha256(load_prompt(config, stage=stage).encode()).hexdigest(),
+        "promptVersion": writing.version,
+        **writing.provenance(),
         **usage_fields(Usage()),
     }
     atomic_json(
@@ -240,11 +244,7 @@ def generate_markdown(
         with Runtime(connection) as runtime:
             result = runtime.generate(request)
         record.update(_record_fields(result.record))
-        markdown = result.data.get("markdown")
-        if not isinstance(markdown, str) or not markdown.strip():
-            raise ContextError("Bridge returned empty or invalid Markdown")
-        if "<!-- excel-catalog:" in markdown:
-            raise ContextError("Generated output contains reserved management markers")
+        markdown = render_context(writing, result.data)
         record["status"] = "success"
         return markdown.strip()
     except GenAIError as exc:

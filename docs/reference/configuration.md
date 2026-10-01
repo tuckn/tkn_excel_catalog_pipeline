@@ -22,7 +22,7 @@ CLI は次の順に設定を読み、後の値を優先します。
 
 | 設定 | 動作 |
 | --- | --- |
-| `schema_version` | 同梱例の値は `"1.2.0"` です。 |
+| `schema_version` | 同梱例の値は `"1.3.0"` です。 |
 | `sources.<id>` | 入力ブックと代理ノートの保存先をまとめる名前です。`--source <id>` で選びます。 |
 | `sources.<id>.workbooks_dir` | 入力ブックのルートフォルダです。 |
 | `sources.<id>.recursive` | 既定は `false`。`true` にするとサブフォルダも調べます。 |
@@ -91,3 +91,18 @@ cover:
 ## AI 生成の設定
 
 `pull --context` は `generation` セクションを使います。AI の接続先、認証、モデルは GenAI Bridge の共有設定で管理します。[生成時の設定と保存内容](../guides/sheet-content.md#準備と実行)を参照してください。
+
+
+## contextのprofile
+
+`generation.prompt_profile` は文章のprofile名（既定 `auto`）、`generation.profile_dirs` はユーザー定義profileを置いた親フォルダの一覧（既定 `[]`）です。CLIの `pull --context --profile <名前>` が設定より優先します。`profile_dirs` は上位の設定で一覧全体を置き換え、相対パスは実行時の作業フォルダから解決します。
+
+```yaml
+generation:
+  prompt_profile: technical-notes
+  profile_dirs:
+    - 'C:\path\to\profiles'
+  bridge_profile: codex-default
+```
+
+この例では `C:\path\to\profiles\technical-notes\` を読みます。指定順で最初の同名フォルダを使い、なければ同梱の `default-ja` / `default-en` を探索します。profileの検証は `--context` で行い、通常のpullやconfig showはAIを呼び出しません。構成ファイル・出力形式・変更時の再利用範囲は[contextのprofile](../guides/sheet-content.md#contextのprofile)を参照してください。

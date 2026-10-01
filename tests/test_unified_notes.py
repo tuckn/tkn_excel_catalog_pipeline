@@ -13,6 +13,7 @@ import excel_catalog_pipeline.context as context
 import excel_catalog_pipeline.paths as paths
 from excel_catalog_pipeline.adapters.markdown import read_note
 from excel_catalog_pipeline.adapters.ooxml import read_core_properties
+from excel_catalog_pipeline.context_profiles import load_context_profile, render_context
 from excel_catalog_pipeline.models import AppConfig, SourceConfig, SyncConfig
 from tests.helpers import create_workbook
 from tests.test_context import rewrite_package
@@ -37,11 +38,13 @@ def setup(tmp_path, monkeypatch):
     def generate(config, evidence, images, usage, logger, *, on_usage, stage="sheet", **kwargs):
         calls.append((stage, evidence))
         on_usage({"inputTokens": 12, "outputTokens": 4, "durationSeconds": 0.1})
-        return (
-            "### Summary\n\nWorkbook meaning."
-            if stage == "workbook"
-            else "### Details\n\nSheet meaning."
-        )
+        values = {
+            "summary": "Workbook meaning." if stage == "workbook" else "Sheet meaning.",
+            "uncertainties": [],
+        }
+        if stage == "sheet":
+            values.update(conclusion=None, key_points=[], sections=[])
+        return render_context(load_context_profile(config, stage=stage), values)
 
     monkeypatch.setattr(context, "render_sheet", render)
     monkeypatch.setattr(context, "generate_markdown", generate)
@@ -346,3 +349,159 @@ def test_plain_pull_never_resolves_ai_connection(setup, monkeypatch):
 
     monkeypatch.setattr(context, "resolve_profile", forbidden)
     assert pull(book, output) == 0
+
+
+def test_separate_sheet_pulls_accumulate_context_and_use_workbook_order(setup):
+    _, book, output, calls = setup
+    add_second_sheet(book)
+    before = book.read_bytes()
+    assert pull(book, output, "--context", "--sheet", "Second") == 0
+    second = context.existing_block(output.read_text(encoding="utf-8"), "2")
+    assert pull(book, None, "--context", "--sheet", "Data") == 0
+    note = read_note(output)
+    assert note.frontmatter["contextAnalyzedSheets"] == ["Data", "Second"]
+    assert note.frontmatter["contextOmittedSheets"] == []
+    assert note.frontmatter["contextStatus"] == "current"
+    assert [item["sheet"] for item in calls[-1][1]["notes"]] == ["Data", "Second"]
+    assert context.existing_block(output.read_text(encoding="utf-8"), "2") == second
+    headings = [line for line in note.body.splitlines() if line.startswith(("# ", "## ", "### "))]
+    assert headings[:5] == [
+        "# Example title",
+        "## ブック要約",
+        "## シート",
+        "### Data",
+        "### Second",
+    ]
+    assert headings[-1] == "## Workbook Map"
+    assert book.read_bytes() == before
+    assert [stage for stage, _ in calls] == ["sheet", "workbook", "sheet", "workbook"]
+    unchanged = output.read_bytes()
+    assert pull(book, None, "--context", "--sheet", "Data") == 0
+    assert output.read_bytes() == unchanged and len(calls) == 4
+    assert pull(book) == 0
+    assert "## シート" in read_note(output).body
+    assert read_note(output).body.index("context-2") < read_note(output).body.index("workbook-map")
+
+
+def test_unselected_changed_sheet_is_included_as_stale_without_regeneration(setup):
+    _, book, output, calls = setup
+    add_second_sheet(book)
+    assert pull(book, output, "--context") == 0
+    old = context.existing_block(output.read_text(encoding="utf-8"), "1")
+    change_cell(book)
+    assert pull(book, None, "--context", "--sheet", "Second") == 0
+    note = read_note(output)
+    assert note.frontmatter["contextStatus"] == "stale"
+    assert note.frontmatter["contextStaleSheets"] == ["Data"]
+    assert note.frontmatter["contextAnalyzedSheets"] == ["Data", "Second"]
+    assert calls[-1][1]["notes"][0]["status"] == "stale"
+    assert context.existing_block(output.read_text(encoding="utf-8"), "1") == old
+    assert [stage for stage, _ in calls[3:]] == ["workbook"]
+    assert pull(book, None, "--context", "--sheet", "Data") == 0
+    assert read_note(output).frontmatter["contextStatus"] == "current"
+    assert read_note(output).frontmatter["contextStaleSheets"] == []
+
+
+def test_unselected_reviewed_context_is_kept_and_marked_unverified(setup):
+    _, book, output, calls = setup
+    add_second_sheet(book)
+    assert pull(book, output, "--context") == 0
+    text = output.read_text(encoding="utf-8")
+    old = context.existing_block(text, "1")
+    edited = old.replace("Sheet meaning.", "Reviewed statement.")
+    output.write_text(
+        text.replace(old, edited) + "\n## Personal\nKeep this exactly.\n", encoding="utf-8"
+    )
+    assert pull(book, None, "--context", "--sheet", "Second") == 0
+    note = read_note(output)
+    assert note.frontmatter["contextUnverifiedSheets"] == ["Data"]
+    assert note.frontmatter["contextStatus"] == "unverified"
+    assert "Reviewed statement." in calls[-1][1]["notes"][0]["markdown"]
+    assert context.existing_block(output.read_text(encoding="utf-8"), "1") == edited
+    assert "\n## Personal\nKeep this exactly.\n" in output.read_text(encoding="utf-8")
+    assert [stage for stage, _ in calls[3:]] == ["workbook"]
+
+
+def test_imported_legacy_context_is_migrated_without_ai_or_content_loss(setup):
+    _, book, output, calls = setup
+    add_second_sheet(book)
+    assert pull(book, output, "--context", "--sheet", "Data") == 0
+    text = output.read_text(encoding="utf-8")
+    old = context.existing_block(text, "1")
+    legacy = (
+        "<!-- excel-catalog:begin context-1 -->\n## Data (sheetId: 1)\n\n"
+        "Imported statement.\n\n### Original topic\n\n| Key | Value |\n| --- | --- |\n| A | B |\n\n"
+        "~~~markdown\n### Literal code heading\n~~~\n"
+        "<!-- excel-catalog:end context-1 -->"
+    )
+    output.write_text(text.replace(old, legacy) + "\nPrivate annotation.\n", encoding="utf-8")
+    state_path = next(paths.app_root().rglob("sheet-1.json"))
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    for name in ("layoutVersion", "promptProfile", "profileVersion", "profileSha256"):
+        state.pop(name, None)
+    state.update(origin="import", blockSha256=context.digest(legacy.encode()))
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    assert pull(book, None, "--context", "--sheet", "Second") == 0
+    text = output.read_text(encoding="utf-8")
+    block = context.existing_block(text, "1")
+    assert "### Data\n" in block and "使用profile: 未記録" in block
+    assert "Imported statement." in block and "##### Original topic" in block
+    assert "| A | B |" in block and "~~~markdown\n### Literal code heading\n~~~" in block
+    assert "Private annotation." in text
+    assert read_note(output).frontmatter["contextUnverifiedSheets"] == ["Data"]
+    assert [evidence["sheet"] for stage, evidence in calls if stage == "sheet"] == [
+        "Data",
+        "Second",
+    ]
+    before = output.read_bytes()
+    assert pull(book, None, "--context", "--sheet", "Data") == 0
+    assert output.read_bytes() == before
+    assert len(calls) == 4
+
+
+def test_individual_profile_names_survive_later_sheet_pulls(setup):
+    _, book, output, calls = setup
+    add_second_sheet(book)
+    assert pull(book, output, "--context", "--sheet", "Data", "--profile", "default-en") == 0
+    assert pull(book, None, "--context", "--sheet", "Second", "--profile", "default-ja") == 0
+    text = output.read_text(encoding="utf-8")
+    assert "Profile: default-en" in context.existing_block(text, "1")
+    assert "使用profile: default-ja" in context.existing_block(text, "2")
+    assert [n["profile"] for n in calls[-1][1]["notes"]] == ["default-en", "default-ja"]
+
+
+def test_invalid_profile_fails_before_note_or_state_writes(setup):
+    _, book, output, calls = setup
+    assert pull(book, output, "--context", "--profile", "missing-profile") == 1
+    assert not output.exists() and not paths.state_path().exists() and not calls
+
+
+def test_custom_templates_invalidate_only_the_relevant_generation_stage(
+    setup, monkeypatch, tmp_path
+):
+    from tests.test_context_profiles import custom_profile
+
+    config, book, output, calls = setup
+    writing, folder = custom_profile(tmp_path)
+    monkeypatch.setattr(cli, "load_config", lambda **kwargs: replace(config, context=writing))
+    assert pull(book, output, "--context") == 0
+    assert "使用profile: custom" in read_note(output).body
+    workbook_template = folder / "workbook-template.md"
+    workbook_template.write_text(
+        workbook_template.read_text(encoding="utf-8").replace("ブック要約", "全体要約"),
+        encoding="utf-8",
+    )
+    assert pull(book, None, "--context") == 0
+    assert [stage for stage, _ in calls[2:]] == ["workbook"]
+    assert "## 全体要約" in read_note(output).body
+    sheet_template = folder / "template.md"
+    sheet_template.write_text(
+        sheet_template.read_text(encoding="utf-8").replace("シート要約", "シート概要"),
+        encoding="utf-8",
+    )
+    assert pull(book, None, "--context") == 0
+    assert [stage for stage, _ in calls[3:]] == ["sheet", "workbook"]
+    assert "#### シート概要" in read_note(output).body
+    before = output.read_bytes()
+    assert pull(book, None, "--context", "--dry-run") == 0
+    assert output.read_bytes() == before and len(calls) == 5

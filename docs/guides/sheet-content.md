@@ -49,8 +49,7 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --
 tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --sheet "Sheet2" --profile default-ja
 ```
 
-対象外のシートはブック全体の説明に使いません。対象と省略したシートの一覧を、本文と Frontmatter に残します。
-一部のシートだけを選んだ場合、以前の対象外シートの説明は保持し、ノートの状態は `partial` になります。
+`--sheet` は今回更新するシートの選択です。ブック要約には、更新後のノートにある全ての現存シートのcontextを使います。以前に取得した非表示シートも対象です。取得済みと未取得の一覧を本文・Frontmatterに残し、未取得シートが残る場合は `partial` とします。古い・未検証のcontextがあれば、その状態を優先して表示します。
 設定した source の全ブックを処理する場合は `pull --source workbooks --context` とします。
 一括処理の `--sheet` は各ブックに同じ名前の選択を適用するため、名前が存在しないブックはエラーになります。
 
@@ -59,11 +58,11 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --sheet "S
 1. Excel、ノート、同期記録を読み、対象シート、設定、既存の生成部分の編集保護を事前検証します。
 2. 同じ `pull` 処理で Frontmatter、シート一覧、抽出テキストを更新します。
 3. 変更のないシート説明は再利用し、変更したシートだけを画像化・AI 解析して更新します。
-4. 対象シートの説明を材料に、ブック全体の概要・シート間の関係・不明点を更新します。この段階で画像を再解析しません。
+4. 既存contextと今回の更新結果をブック内の順番で集め、ブック要約を更新します。単一シートのpullでも取得済みの全contextを使い、この段階で画像を再解析しません。
 5. 対象範囲、生成日時、対応する Excel の内容を記録します。
 
 初回は選択シート数 + 1 回の AI 呼び出しです。
-シートの内容・関連データ・描画設定・プロンプト・Bridge の生成条件と版・出力スキーマが同じで、画像と生成本文が保たれている場合、シートの結果を再利用します。
+シートの内容・関連データ・描画設定・profileのプロンプト/スキーマ/テンプレート・Bridge の生成条件と版・出力スキーマが同じで、画像と生成本文が保たれている場合、シートの結果を再利用します。
 ブック全体の説明も材料と生成条件が同じなら再利用し、すべて再利用できれば Excel 起動・AI 呼び出しは 0 回です。
 共有書式の変更は複数シートの再生成につながる場合があります。
 
@@ -82,11 +81,13 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --sheet "S
 | --- | --- |
 | `not-generated` | AI の説明をまだ生成していません。 |
 | `current` | 表示・選択範囲を含む全シートの説明が保存済み Excel と対応しています。人による確認済みという意味ではありません。 |
-| `partial` | 指定した範囲だけを解析しました。省略シートがあります。 |
+| `partial` | 取得済みcontextは原本に対応していますが、未取得シートがあります。 |
 | `stale` | Excel の内容が生成時から変化した、または全体の更新が完了していません。 |
 | `unverified` | 旧説明などがあり、現在の保存済み Excel との対応を記録で確認できません。 |
 
-`contextAnalyzedSheets` は解析したシート、`contextOmittedSheets` は省略したシート、`contextGeneratedAt` はブック全体の説明の生成日時です。
+`contextAnalyzedSheets` は蓄積されたcontextのある現存シート、`contextOmittedSheets` はcontext未取得のシート、`contextGeneratedAt` はブック要約の生成日時です。いずれも直近コマンドの選択範囲だけを意味しません。
+`contextStaleSheets` は原本の変更を検出したシート、`contextUnverifiedSheets` は取り込み済み・手編集・記録不足・画像欠落などで原本との対応を確認できないシートです。これらのcontextも状態を添えて統合し、最新の確認済み内容とは断定しないよう指示します。
+新しい生成記録にはシートと関連ファイルの識別値を保存するため、他シートの更新だけで未選択シートを古いと判定しません。旧記録はブック全体の保存内容が完全一致する場合のみ対応を確認し、それ以外は未検証とします。
 `contextSourceFingerprint` は生成完了時のブック内容の識別値です。Excel の文書プロパティだけの変更は、シート説明の再生成を必要としません。
 AI なしの `pull` は説明を生成し直さず、古くなった説明を `stale` として保持します。
 `push` は説明を Excel に書き戻しません。
@@ -116,8 +117,8 @@ AI には領域を Z 字順に読み、矢印・色・配置を解釈するよ�
 
 ブック全体の説明は `context-workbook`、各シートの説明は `context-<sheetId>` 管理セクションに保存します。
 Frontmatter のユーザー項目、管理マーカー外の文章は保持します。
-シート説明だけでなくブック全体の説明も、手直しや対応する記録の欠落を検出すると保護します。
-Excel から削除されたシートの生成セクションは、`--context` で記録と一致を確認して取り除きます。手直しされていれば停止し、根拠画像は残します。
+今回更新するシート説明とブック要約は、手直しや対応する記録の欠落を検出すると上書きを止めます。選択外の手編集済みcontextはそのまま保持し、未検証としてブック要約に含めます。
+Excel から削除されたシートの生成セクションは、`--context` で記録と一致を確認して取り除きます。手直しされていれば停止し、根拠画像は残します。取り込み済みセクションは履歴として保持しますが、現存シートのブック要約には含めません。
 再生成して置き換える場合だけ `pull --context --force` を使います。関係のない既存 Markdown の上書きには使えません。
 生成中に Excel やノートの変更を検出した場合は、`--force` でも停止します。
 
@@ -171,30 +172,80 @@ AI 呼び出しは自動再試行しません。使用量の記録や未使用�
 `null` は Bridge やモデルの入力上限を解除しません。大きな入力では処理時間やトークン使用量が増え得ます。画像の圧縮や解像度変更では JSON の文字数は減りません。
 条件の変更により、前回の生成結果を再利用できなくなる場合があります。
 
-### 生成プロンプトのプロファイル
+### contextのprofile
 
-`--profile` は文章の作り方・出力言語を選びます。AI 接続先を選ぶ `generation.bridge_profile` とは別です。
-`pull --context --profile default-ja` / `default-en` で指定します。
+`--profile` は文章の作り方・出力言語を選びます。AI 接続先を選ぶ `generation.bridge_profile` とは別です。優先順位はCLIの `--profile`、有効な設定の `generation.prompt_profile`、既定の `auto` です。
 
 ```yaml
 generation:
   prompt_profile: default-ja
+  profile_dirs: []
   bridge_profile: codex-default
 ```
 
-既定の `prompt_profile: auto` は従来の `generation.language` を維持します。
-`default-ja` / `default-en` を明示すると日本語 / 英語が優先されます。
-プロンプトは以下に同梱してあり、将来のプロファイル追加の基点となります。現時点で指定可能なのはこの2種類です。
+`auto` は `generation.language` が `English` / `en` のとき `default-en`、それ以外は `default-ja` を使い、プロンプトの言語指定には設定の値を渡します。profile名を明示すると、テンプレートの `language` が優先されます。
 
-```text
-src/excel_catalog_pipeline/context_profiles/
-  default-ja/
-    prompt.md           # シートの画像解析
-    workbook-prompt.md  # ブック全体の統合
-  default-en/
-    prompt.md
-    workbook-prompt.md
+同梱フォルダは `src/excel_catalog_pipeline/context_profiles/default-ja/` と `default-en/` です。各フォルダに次の6ファイルがあります。
+
+| 用途 | 指示 | 出力構造 | 表示 |
+| --- | --- | --- | --- |
+| シート | `prompt.md` | `output.schema.json` | `template.md` |
+| ブック | `workbook-prompt.md` | `workbook-output.schema.json` | `workbook-template.md` |
+
+テンプレートのFrontmatterに `version`、`language`、表示用の `labels` を持たせます。版は引用符付き文字列です。プロンプトには `{{language}}` を使えます。
+
+シートの出力スキーマは `summary`、`conclusion`、`key_points`、`sections`、`uncertainties` を持つJSONオブジェクトです。ブックは `summary` と `uncertainties` です。これらのフィールド名と値の構造はrendererとの契約なので維持します。`sections` の件数・見出し・下位項目は可変で、profileの指示に応じてAIが構成します。スキーマで長さや件数などを制約できます。外部URLを参照するスキーマは読み込みません。
+
+テンプレートは `{{summary}}` などのフィールドと、`{{#conclusion}}...{{/conclusion}}` の条件付き領域に対応します。条件付き領域は入れ子にせず、対象が `null` / 空配列なら章全体を省略します。各フィールドは1回ずつ配置し、生成値の中にあるテンプレート風の文字列を再解釈しません。
+
+独自profileは、同梱フォルダを丸ごとコピーして編集します。たとえば `C:\path\to\profiles\technical-notes\` に6ファイルを置いた場合、親フォルダを設定します。
+
+```yaml
+generation:
+  prompt_profile: technical-notes
+  profile_dirs:
+    - 'C:\path\to\profiles'
 ```
 
-プロンプトの変更はハッシュで追跡し、`pull --context` の再利用判定にも反映します。
-同梱ファイルを編集した後は `uv tool install . --reinstall` でインストール済み CLI に反映してください。
+```shell
+tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile technical-notes --dry-run
+tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile technical-notes
+```
+
+`profile_dirs` は設定順に探索し、最初に見つかった同名フォルダを使います。同名がなければ同梱profileを使います。不完全な上書きフォルダから不足ファイルだけを補完することはせず、エラーにします。相対パスは実行時の作業フォルダ基準です。profile名には小文字英数字・`-`・`_`・`.` が使え、先頭は英数字にします。
+
+profileは両段階のリソースを事前検証します。選択したシートとブック要約に指定profileを適用し、選択外シートは作成時のprofile表示を保持します。本文にはシートごとのprofile名を表示し、状態・使用量記録には版とプロンプト/スキーマ/テンプレートのハッシュを保存します。
+
+各段階の3ファイルの変更を再利用判定へ反映します。ブック用ファイルだけを変更してもシート画像の解析は再実行しません。ユーザー定義profileの編集は次回実行から反映されます。同梱リソースを編集した後は `uv tool install . --reinstall` でインストール済みCLIに反映してください。
+
+### 本文構成と旧context
+
+```markdown
+# <タイトル>
+
+## ブック要約
+
+## シート
+
+### <シート名>
+使用profile: default-ja
+
+#### シート要約
+#### 結論
+#### 要点
+#### 内容
+##### <内容に応じた見出し>
+###### <必要な下位見出し>
+#### 不確実な点
+#### 出典画像
+
+## Extracted Text
+
+## Workbook Map
+```
+
+シート要約は必須です。結論がないシートは `null`、不要な要点・詳細・不確実な点は空配列を返し、対応する章を省略します。`内容` の中では説明文・表・手順を保持し、見出しは生成結果の構造から組み立てます。「シート間の関係」は独立章にせず、必要な関係だけブック要約や各シートの本文に織り込みます。
+
+シートは取得順ではなくブック内の順に並べます。既存の `Extracted Text` は補助資料として保持し、Workbook Mapを管理本文の最後に置きます。管理マーカー外の文字列は保持します。
+
+旧形式で記録と本文が一致するブロックは、AIを呼ばずに見出しだけを階層化します。取り込み済みcontextの文章・表・画像参照・コード例は保持し、分からないprofileは「未記録」と表示します。旧本文からシート要約を推測して追加することはしません。選択外の手編集済み・記録のない旧ブロックは整形もせず保持するため、再生成までは旧見出しが混在する場合があります。取り込み済みcontextを新構成で再生成する場合のみ、対象シートを指定して `--force` を使います。

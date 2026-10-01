@@ -21,11 +21,15 @@ from tkn_genai_bridge.models import ResponseMetadata
 from tkn_genai_bridge.providers import cli
 
 import excel_catalog_pipeline.context_provider as provider
+from excel_catalog_pipeline.context_profiles import load_context_profile
 from excel_catalog_pipeline.context_source import ContextError
 from excel_catalog_pipeline.models import ContextConfig
 
 LOGGER = logging.getLogger("bridge-tests")
 PNG = b"\x89PNG\r\n\x1a\nfixture"
+GOOD = json.dumps(
+    {"summary": "Good", "conclusion": None, "key_points": [], "sections": [], "uncertainties": []}
+)
 
 
 @pytest.fixture
@@ -61,23 +65,21 @@ def test_real_bridge_receives_ordered_images_schema_and_journals_usage(setup_pro
         ]
         assert images == [PNG, PNG + b"second"]
         schema = Path(command[command.index("--output-schema") + 1])
-        assert json.loads(schema.read_text()) == provider.SCHEMA
-        Path(command[command.index("--output-last-message") + 1]).write_text(
-            '{"markdown":"### Good"}'
-        )
+        assert json.loads(schema.read_text()) == load_context_profile(ContextConfig()).schema
+        Path(command[command.index("--output-last-message") + 1]).write_text(GOOD)
         return '{"type":"turn.completed","usage":{"input_tokens":200,"output_tokens":30,"cached_input_tokens":150}}'
 
     monkeypatch.setattr(cli, "run_process", run)
     result = provider.generate_markdown(
         ContextConfig(), {"sheet": "Data"}, [image, other], journal, LOGGER
     )
-    assert result == "### Good" and len(calls) == 1
+    assert "Good" in result and "#### シート要約" in result and len(calls) == 1
     record = json.loads(journal.read_text())
     assert record["inputTokens"] == 200 and record["cachedInputTokens"] == 150
     assert record["usageComplete"] is True
     assert record["generationRecord"]["bridge_version"] == "0.10.0"
     assert len(record["generationRecord"]["images"]) == 2
-    assert "### Good" not in journal.read_text()
+    assert "Good" not in journal.read_text()
     assert "SOURCE CONTENT" not in journal.read_text()
     assert str(image) not in journal.read_text()
 
@@ -107,16 +109,14 @@ def test_oversize_evidence_uses_column_tables_without_dropping_values(setup_prov
         assert len(table["rows"]) == len(cells)
         for original, row in zip(cells, table["rows"], strict=True):
             assert dict(zip(table["columns"], row, strict=True)) == original
-        Path(command[command.index("--output-last-message") + 1]).write_text(
-            '{"markdown":"### Good"}'
-        )
+        Path(command[command.index("--output-last-message") + 1]).write_text(GOOD)
         return '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":3}}'
 
     monkeypatch.setattr(cli, "run_process", run)
     result = provider.generate_markdown(
         ContextConfig(max_input_chars=6000), evidence, [image], journal, LOGGER
     )
-    assert result == "### Good"
+    assert "Good" in result and "#### シート要約" in result
     record = json.loads(journal.read_text())
     assert record["status"] == "success"
     assert record["evidenceEncoding"] == "column-tables"
@@ -175,6 +175,9 @@ def test_failed_bridge_call_keeps_known_subtotal_and_does_not_retry(
     "output",
     [
         "not json",
+        GOOD.replace("Good", "   "),
+        GOOD.replace("Good", "<!-- excel-catalog:begin test -->"),
+        GOOD.replace("Good", "## Unmanaged heading"),
         '{"unexpected":1}',
         '{"markdown":""}',
         '{"markdown":"   "}',
@@ -243,7 +246,7 @@ def test_all_bridge_image_providers_resolve_and_plan_without_generation(monkeypa
         plan = runtime.plan(
             GenerationRequest(
                 prompt="Describe sheet",
-                output_schema=provider.SCHEMA,
+                output_schema=load_context_profile(ContextConfig()).schema,
                 images=[ImageInput(data=PNG, media_type="image/png")],
             ),
             check_executable=False,
@@ -283,9 +286,9 @@ def test_workbook_profile_uses_text_only_bridge_input(setup_provider, monkeypatc
     def run(command, prompt, *args, **kwargs):
         assert "--image" not in command
         assert "in English" in prompt
-        assert "Relationships between sheets" in prompt
+        assert "ALL the supplied sheet notes" in prompt
         Path(command[command.index("--output-last-message") + 1]).write_text(
-            '{"markdown":"### Overview"}'
+            '{"summary":"Overview","uncertainties":[]}'
         )
         return '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":3}}'
 
@@ -298,7 +301,37 @@ def test_workbook_profile_uses_text_only_bridge_input(setup_provider, monkeypatc
         LOGGER,
         stage="workbook",
     )
-    assert result == "### Overview"
+    assert result == "Overview"
     record = json.loads(journal.read_text())
     assert record["promptProfile"] == "default-en"
     assert len(record["promptSha256"]) == 64
+
+
+def test_custom_schema_and_template_are_used_by_bridge(setup_provider, monkeypatch, tmp_path):
+    from tests.test_context_profiles import custom_profile
+
+    config, folder = custom_profile(tmp_path)
+    image, journal = setup_provider
+    path = folder / "output.schema.json"
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    schema["properties"]["summary"]["minLength"] = 3
+    path.write_text(json.dumps(schema), encoding="utf-8")
+    template = folder / "template.md"
+    template.write_text(
+        template.read_text(encoding="utf-8").replace("#### シート要約", "#### 概説"),
+        encoding="utf-8",
+    )
+
+    def run(command, *args, **kwargs):
+        supplied_schema = Path(command[command.index("--output-schema") + 1])
+        assert json.loads(supplied_schema.read_text(encoding="utf-8")) == schema
+        Path(command[command.index("--output-last-message") + 1]).write_text(GOOD)
+        return '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":3}}'
+
+    monkeypatch.setattr(cli, "run_process", run)
+    result = provider.generate_markdown(config, {"sheet": "Data"}, [image], journal, LOGGER)
+    assert "#### 概説" in result
+    record = json.loads(journal.read_text(encoding="utf-8"))
+    writing = load_context_profile(config)
+    assert record["profileSha256"] == writing.sha256
+    assert record["templateSha256"] == writing.template_sha256

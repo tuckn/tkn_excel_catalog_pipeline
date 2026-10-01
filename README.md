@@ -4,7 +4,7 @@ Excel ブックを、生成 AI が参照しやすい Markdown ノートにしま
 1 ブックにつき 1 ノートを作り、Excel の更新を取り込み、ノートの Frontmatter で編集したメタデータを Excel に反映できます。
 複数ブックを扱う場合は、同じ処理をフォルダ単位で実行できます。
 
-`pull --context` はシートの画像・文字・配置から説明を生成し、ブック全体の概要とシート間の関係も同じノートにまとめます。
+`pull --context` はシートの画像・文字・配置から説明を生成し、取得済みシートのcontextを統合したブック要約を同じノートにまとめます。
 AI を使わない `pull` は、メタデータ、シート一覧、抽出テキストを更新します。
 Excel が原本で、Markdown は参照・検索・編集可能なメタデータのための代理ノートです。
 
@@ -35,8 +35,17 @@ tkn-excel-note pull "C:\path\to\book.xlsx" --output "C:\path\to\book.xlsx.md" --
 
 - 元 Excel のパス、タイトル、作成者などのメタデータ。
 - ブックのシート一覧と抽出テキスト。
-- ブック全体の概要、シート間の関係、不明点。
-- 各シートの説明と、解析に使用した画像への相対リンク。
+- 取得済みcontext全体に基づくブック要約と、未取得・古い・未検証のシートの表示。
+- ブック内の順番に並ぶ各シートの要約、必要な結論・要点、内容と出典画像。
+- 末尾の Workbook Map。
+
+`--sheet` は今回更新するシートを選びます。以前に取得した別シートのcontextもブック要約の材料として保持します。シート本文は「シート要約」を共通の入口とし、結論・要点は必要な場合だけ表示します。「内容」の中の見出しはシートに応じて生成します。
+
+```shell
+tkn-excel-note pull "C:\path\to\book.xlsx" --context --sheet "Sheet1" --profile default-ja
+```
+
+`--profile` は文章のprofileです。同梱の `default-ja` / `default-en` とユーザー定義profileを選べます。[本文構成とprofileの作り方](docs/guides/sheet-content.md#contextのprofile)を参照してください。
 
 画像と抽出根拠はノートと同じ階層の `img/` に保存します。
 生成した説明には解釈が含まれるため、重要な判断に使う箇所は元シートと見比べてください。
@@ -239,7 +248,7 @@ uv tool uninstall tkn-excel-catalog-pipeline
 
 保存領域は `~/.tkn/excel_note/` に統一しています。旧 `~/.tkn/excel_catalog_pipeline/` を使っていた場合は、CLI を停止し、移行先が存在しないことを確認してフォルダ全体を `excel_note` へ名前変更してください。設定・同期記録・生成履歴・バックアップをまとめて引き継ぎます。両方のフォルダがある場合は自動で統合せず、内容を確認してください。
 ノートの識別子、管理マーカー、Excel の固定 ID も維持するため、既存ノートを作り直す必要はありません。
-既存のシート説明は再利用でき、初回の `pull --context` でブック全体の説明を追加します。
+既存のシート説明はブック要約の材料として保持します。選択した生成済みシートは新しいprofileで再生成します。取り込み済みの説明は保持し、記録と本文が一致する旧形式のブロックだけ見出しを整えます。旧contextのシート要約は、明示的に再生成するまで追加しません。
 旧 `export` の同期情報を持たない Markdown は、独立した書き出しとして残ります。新ノートは別の保存先で作成してください。
 
 ## 詳しい情報と開発
@@ -268,6 +277,6 @@ Remove-Item Env:TKN_EXCEL_NOTE_NATIVE_TESTS
 
 内部 Python パッケージ名は既存の `excel_catalog_pipeline` を維持しています。
 [CLI](src/excel_catalog_pipeline/cli.py)、[単体入力の解決](src/excel_catalog_pipeline/targets.py)、[同期処理](src/excel_catalog_pipeline/pipeline.py)、[AI 統合](src/excel_catalog_pipeline/ai_pull.py)、[生成処理](src/excel_catalog_pipeline/context.py)が実装の入口です。
-[ノートテンプレート](src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md)と生成プロンプトはパッケージに同梱します。
+[ノートテンプレート](src/excel_catalog_pipeline/note_profiles/tkn-obsidian-v1/template.md)と[context profile](src/excel_catalog_pipeline/context_profiles/)のプロンプト・出力スキーマ・テンプレートをパッケージに同梱します。
 コード編集をインストール環境へ直接反映する開発用途では `uv tool install -e . --reinstall` も使えます。
 依存・メタデータ・リソース変更後は再インストールします。テストと設定例には架空データだけを使います。

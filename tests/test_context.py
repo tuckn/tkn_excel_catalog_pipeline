@@ -185,7 +185,7 @@ def test_build_preserves_bytes_outside_block_and_reuses_cache(build_setup) -> No
     assert first["usage"]["inputTokens"] == 20
     added = context.existing_block(note.read_bytes().decode("utf-8-sig"), "1")
     assert added is not None
-    assert "## Data (sheetId: 1)\r\n" in added
+    assert "### Data\r\n" in added
     assert note.read_bytes().replace(added.encode("utf-8") + b"\r\n\r\n", b"", 1) == before
     assert workbook.read_bytes() == source_before
     images = list((note.parent / "img").rglob("*.png"))
@@ -300,7 +300,9 @@ def test_local_link_diagnostics_do_not_include_targets() -> None:
     assert "example" not in str(error.value)
 
 
-def test_unrecognized_image_path_still_rejected_without_publishing(build_setup, monkeypatch) -> None:
+def test_unrecognized_image_path_still_rejected_without_publishing(
+    build_setup, monkeypatch
+) -> None:
     source, _, note, _, _, run = build_setup
     before = note.read_bytes()
 
@@ -459,6 +461,7 @@ def test_context_cli_dry_run_has_single_json_output_and_no_artifacts(
 
     source, _, _, state, calls, _ = build_setup
     import excel_catalog_pipeline.pipeline as pipeline
+
     monkeypatch.setattr(pipeline, "state_path", lambda: state / "sync-state.json")
     monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "absent.yaml")
     monkeypatch.chdir(tmp_path)
@@ -574,7 +577,15 @@ def test_build_through_real_bridge_preserves_workbook_and_failure_note(
         if failed:
             raise ProviderError("fixture failure", code="process_exit")
         Path(command[command.index("--output-last-message") + 1]).write_text(
-            '{"markdown":"### Generated through Bridge"}'
+            json.dumps(
+                {
+                    "summary": "Generated through Bridge",
+                    "conclusion": None,
+                    "key_points": [],
+                    "sections": [],
+                    "uncertainties": [],
+                }
+            )
         )
         return '{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":4}}'
 

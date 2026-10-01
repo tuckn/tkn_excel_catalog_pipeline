@@ -205,7 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="AI sheet selection, repeatable; default: all visible worksheets.",
     )
-    pull.add_argument("--profile", choices=("default-ja", "default-en"), help="AI writing profile.")
+    pull.add_argument(
+        "--profile", help="Context profile name (built-in or generation.profile_dirs)."
+    )
     pull.add_argument(
         "--force",
         action="store_true",

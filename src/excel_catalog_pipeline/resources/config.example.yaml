@@ -1,4 +1,4 @@
-schema_version: "1.2.0"
+schema_version: "1.3.0"
 
 sources:
   personal-excel:
@@ -34,8 +34,10 @@ sync:
 # Connections/models/authentication: ~/.tkn/genai_bridge/config.yaml.
 # Evidence images live in the proxy note's sibling img/ directory.
 generation:
-  # Prompt profile (separate from the AI connection): auto, default-ja, default-en.
+  # Context profile bundle: built-in default-ja/default-en or a custom directory name.
   prompt_profile: auto
+  # Ordered parent directories containing custom profile folders; first match wins.
+  profile_dirs: []
   # Select an image-capable model in the shared profile.
   # Examples: claude-default, copilot-default, antigravity-default, local-vision, azure-quality.
   bridge_profile: codex-default

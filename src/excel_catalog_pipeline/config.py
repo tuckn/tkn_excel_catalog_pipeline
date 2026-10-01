@@ -27,7 +27,7 @@ from .models import (
 from .note_resources import NoteResourceError, load_note_template
 from .paths import global_config_path
 
-SCHEMA_VERSION = "1.2.0"
+SCHEMA_VERSION = "1.3.0"
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
     "sources": {},
@@ -352,6 +352,15 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
         value = context_values[name]
         if name == "overrides":
             continue
+        if name == "profile_dirs":
+            if not isinstance(value, (list, tuple)) or any(
+                not isinstance(item, str) or not item.strip() for item in value
+            ):
+                raise ConfigError("generation.profile_dirs must be a list of directory paths")
+            context_values[name] = tuple(
+                str(_path_value(item, "generation.profile_dirs")) for item in value
+            )
+            continue
         if name == "max_input_chars":
             if value is not None and (type(value) is not int or value <= 0):
                 raise ConfigError("generation.max_input_chars must be a positive integer or null")
@@ -361,8 +370,8 @@ def validate_config(data: dict[str, Any], *, loaded_files: tuple[Path, ...] = ()
                 raise ConfigError(f"generation.{name} must be a positive integer")
         elif not isinstance(value, str) or not value.strip():
             raise ConfigError(f"generation.{name} must be a non-empty string")
-    if context_values["prompt_profile"] not in {"auto", "default-ja", "default-en"}:
-        raise ConfigError("generation.prompt_profile must be auto, default-ja, or default-en")
+    if re.fullmatch(r"[a-z0-9][a-z0-9._-]*", context_values["prompt_profile"]) is None:
+        raise ConfigError("generation.prompt_profile must be a profile directory name or auto")
     if context_values["overlap_points"] * 2 >= min(
         context_values["tile_width_points"], context_values["tile_height_points"]
     ):

@@ -329,7 +329,10 @@ def test_generation_bridge_overrides_are_preserved():
     config = config_module.validate_config(data)
     assert config.context.bridge_profile == "codex-default"
     assert config.context.overrides == data["generation"]["overrides"]
-    assert config_module.config_as_dict(config)["generation"]["overrides"] == data["generation"]["overrides"]
+    assert (
+        config_module.config_as_dict(config)["generation"]["overrides"]
+        == data["generation"]["overrides"]
+    )
 
 
 def test_evidence_character_limit_is_optional_and_can_be_set():
@@ -353,7 +356,9 @@ def test_evidence_character_limit_rejects_invalid_values(value):
 
 def test_generation_layer_precedence(tmp_path, monkeypatch):
     shared = tmp_path / "global.yaml"
-    shared.write_text("generation:\n  overrides:\n    model: base-model\n    timeout_seconds: 600\n")
+    shared.write_text(
+        "generation:\n  overrides:\n    model: base-model\n    timeout_seconds: 600\n"
+    )
     project = tmp_path / ".tkn" / "config.yaml"
     project.parent.mkdir()
     project.write_text("generation:\n  overrides:\n    model: project-model\n")
@@ -386,14 +391,32 @@ def test_bridge_context_settings_are_strict(settings):
         config_module.validate_config({**config_module.DEFAULT_CONFIG, "generation": settings})
 
 
-@pytest.mark.parametrize("version", [1, "1.1.0", "1.2.0"])
+@pytest.mark.parametrize("version", [1, "1.1.0", "1.2.0", "1.3.0"])
 def test_schema_version_normalizes_to_semver(version):
-    config = config_module.validate_config({**config_module.DEFAULT_CONFIG, "schema_version": version})
-    assert config.schema_version == "1.2.0"
-    assert config_as_dict(config)["schema_version"] == "1.2.0"
+    config = config_module.validate_config(
+        {**config_module.DEFAULT_CONFIG, "schema_version": version}
+    )
+    assert config.schema_version == "1.3.0"
+    assert config_as_dict(config)["schema_version"] == "1.3.0"
 
 
-@pytest.mark.parametrize("version", [True, 1.0, None, "1", "01.0.0", "1.0", "1.0.0-rc.1", "1.0.0+build", "0.9.0", "2.0.0", "1.3.0", "1.2.1"])
+@pytest.mark.parametrize(
+    "version",
+    [
+        True,
+        1.0,
+        None,
+        "1",
+        "01.0.0",
+        "1.0",
+        "1.0.0-rc.1",
+        "1.0.0+build",
+        "0.9.0",
+        "2.0.0",
+        "1.4.0",
+        "1.3.1",
+    ],
+)
 def test_invalid_or_unsupported_schema_version(version):
     with pytest.raises(ConfigError, match="schema_version"):
         config_module.validate_config({**config_module.DEFAULT_CONFIG, "schema_version": version})
@@ -414,7 +437,10 @@ def test_context_config_layer_is_rejected(tmp_path, monkeypatch):
         load_config(cwd=tmp_path, explicit=explicit)
 
 
-@pytest.mark.parametrize("invalid", ['schema_version: "2.0.0"', 'generation: {max_images: false}', 'generation: {typo: 1}'])
+@pytest.mark.parametrize(
+    "invalid",
+    ['schema_version: "2.0.0"', "generation: {max_images: false}", "generation: {typo: 1}"],
+)
 def test_invalid_lower_layer_cannot_be_hidden(tmp_path, monkeypatch, invalid):
     shared = tmp_path / "shared.yaml"
     shared.write_text(invalid + "\n")
@@ -429,7 +455,7 @@ def test_template_uses_current_schema_and_generation():
     import yaml
 
     data = yaml.safe_load(config_template_text())
-    assert data["schema_version"] == "1.2.0"
+    assert data["schema_version"] == "1.3.0"
     assert "generation" in data and "context" not in data
     config_module.validate_config(data)
 

@@ -22,9 +22,9 @@ from tkn_genai_bridge import Profile
 
 from .adapters.markdown import discover_notes
 from .adapters.ooxml import content_fingerprint, read_custom_properties
-from .context_profiles import load_prompt, profile_name, prompt_digest
+from .context_layout import arrange_context, migrate_legacy_block, sheet_heading
+from .context_profiles import load_context_profile
 from .context_provider import (
-    PROMPT_VERSION,
     atomic_json,
     evidence_payload,
     generate_markdown,
@@ -178,7 +178,11 @@ def _visible_markdown(markdown: str) -> str:
     while index < len(ticks):
         opening = ticks[index]
         closing = next(
-            (candidate for candidate in ticks[index + 1 :] if len(candidate.group()) == len(opening.group())),
+            (
+                candidate
+                for candidate in ticks[index + 1 :]
+                if len(candidate.group()) == len(opening.group())
+            ),
             None,
         )
         if closing is None:
@@ -211,7 +215,9 @@ def _prepare_markdown(markdown: str, image_paths: set[str]) -> tuple[str, list[t
     for match in links:
         if match.group(1) == "!" and match.group(3).strip("<>") not in image_paths:
             line = markdown.count("\n", 0, match.start()) + 1
-            raise ContextError(f"Generated Markdown contains an unrecognized image path at line {line}")
+            raise ContextError(
+                f"Generated Markdown contains an unrecognized image path at line {line}"
+            )
     replacements: list[tuple[int, int, str]] = []
     converted: list[tuple[int, str]] = []
     for match in links:
@@ -220,7 +226,9 @@ def _prepare_markdown(markdown: str, image_paths: set[str]) -> tuple[str, list[t
             continue
         line = markdown.count("\n", 0, match.start()) + 1
         if match.group(1) == "!" or not match.group(2).strip():
-            raise ContextError(f"Generated Markdown contains a nonportable {kind} link at line {line}")
+            raise ContextError(
+                f"Generated Markdown contains a nonportable {kind} link at line {line}"
+            )
         replacements.append((match.start(), match.end(), markdown[match.start(2) : match.end(2)]))
         converted.append((line, kind))
     for start, end, label in reversed(replacements):
@@ -250,6 +258,10 @@ def build_context(
     results: list[dict[str, Any]] = []
     records: list[dict[str, Any]] = []
     state_dir = state_root() / "context" / digest(str(note.resolve()).encode())[:24]
+    # Validate both stages before any rendering, paid call, or persistent write.
+    writing = load_context_profile(config)
+    if include_overview:
+        load_context_profile(config, stage="workbook")
     # Validate all requested sheets before any rendering, paid call, or persistent write.
     prepared = [
         extract_sheet(data, sheet, max_cells=config.max_cells, max_objects=config.max_objects)
@@ -294,7 +306,7 @@ def build_context(
                 continue
             if connection is None:
                 connection = resolve_profile(config)
-                plan = generation_plan(connection)
+                plan = generation_plan(connection, config=config)
             result["bridgePlan"] = plan
             key = digest(
                 json.dumps(
@@ -303,7 +315,7 @@ def build_context(
                         "config": {
                             k: v
                             for k, v in asdict(config).items()
-                            if k not in {"bridge_profile", "overrides"}
+                            if k not in {"bridge_profile", "overrides", "profile_dirs"}
                         },
                         "bridge": {
                             k: plan[k]
@@ -313,8 +325,7 @@ def build_context(
                                 "schema_sha256",
                             )
                         },
-                        "promptVersion": PROMPT_VERSION,
-                        "promptSha256": prompt_digest(config),
+                        "contextProfileSha256": writing.sha256,
                     },
                     sort_keys=True,
                 ).encode()
@@ -338,7 +349,7 @@ def build_context(
                     sheet["name"],
                 )
                 continue
-            generation_plan(connection, check_executable=True)
+            generation_plan(connection, config=config, check_executable=True)
             with tempfile.TemporaryDirectory(prefix="excel-catalog-context-") as temporary:
                 working = Path(temporary).resolve()
                 snapshot = working / ("snapshot" + workbook.suffix)
@@ -383,13 +394,13 @@ def build_context(
                     f"- [{image['range']} ({'overview' if image['overview'] else 'detail'})]({image['relativePath']})"
                     for image in images
                 )
-                heading = sheet["name"].replace("\n", " ").replace("\r", " ")
+                heading = sheet_heading(sheet["name"])
                 block = (
                     f"<!-- excel-catalog:begin context-{sheet['id']} -->\n"
-                    f"## {heading} (sheetId: {sheet['id']})\n\n{markdown}\n\n"
-                    f"### Source images\n\n{links}\n\n"
+                    f"### {heading}\n\n{writing.labels['profile']}: {writing.name}\n\n{markdown}\n\n"
+                    f"#### {writing.labels['source_images']}\n\n{links}\n\n"
                     f"<!-- Saved-file snapshot SHA256: {digest(data)}; generated: {utc_now()}; "
-                    f"provider: {plan['provider']}; requested model: {plan['model'] or 'provider default'}; prompt: {PROMPT_VERSION} -->\n"
+                    f"provider: {plan['provider']}; requested model: {plan['model'] or 'provider default'}; profile: {writing.name}; version: {writing.version}; profile SHA256: {writing.sha256} -->\n"
                     f"<!-- excel-catalog:end context-{sheet['id']} -->"
                 )
                 block_hash = digest(block.encode())
@@ -432,6 +443,9 @@ def build_context(
                         "blockSha256": block_hash,
                         "assets": assets,
                         "snapshotSha256": digest(data),
+                        "sourceFingerprint": evidence["fingerprint"],
+                        "layoutVersion": 1,
+                        **writing.provenance(),
                         "sheet": sheet["name"],
                         "usagePath": str(usage_path),
                         "generatedAt": utc_now(),
@@ -485,6 +499,60 @@ def build_context(
     }
 
 
+def _collect_context(
+    text: str, note: Path, data: bytes, config: ContextConfig, state_dir: Path
+) -> tuple[str, list[dict[str, Any]], dict[Path, dict[str, Any]]]:
+    notes: list[dict[str, Any]] = []
+    migrations: dict[Path, dict[str, Any]] = {}
+    writing = load_context_profile(config)
+    for sheet in sheet_list(data):
+        block = existing_block(text, sheet["id"])
+        if block is None:
+            continue
+        state_path = state_dir / f"sheet-{sheet['id']}.json"
+        saved = _read_state(state_path)
+        matches = digest(block.replace("\r\n", "\n").encode()) == saved.get("blockSha256")
+        status = "unverified"
+        if matches and saved.get("origin") != "import" and _assets_intact(note, saved):
+            if saved.get("sourceFingerprint"):
+                try:
+                    evidence = extract_sheet(
+                        data, sheet, max_cells=config.max_cells, max_objects=config.max_objects
+                    )
+                    status = (
+                        "current"
+                        if evidence["fingerprint"] == saved["sourceFingerprint"]
+                        else "stale"
+                    )
+                except ContextError:
+                    status = "unverified"
+            elif saved.get("snapshotSha256") == digest(data):
+                status = "current"
+        if matches:
+            migrated = migrate_legacy_block(block, sheet, saved, writing)
+            if migrated != block:
+                text = update_text(text, sheet["id"], migrated)
+                block = migrated
+                saved = {
+                    **saved,
+                    "layoutVersion": 1,
+                    "blockSha256": digest(block.replace("\r\n", "\n").encode()),
+                }
+                migrations[state_path] = saved
+        notes.append(
+            {
+                "sheet": sheet["name"],
+                "sheetId": sheet["id"],
+                "status": status,
+                "origin": saved.get("origin", "generated" if saved else "unknown"),
+                "profile": saved.get("promptProfile"),
+                "generatedAt": saved.get("generatedAt"),
+                "markdown": block,
+            }
+        )
+    return text, notes, migrations
+
+
 def _build_overview(
     note: Path,
     workbook: Path,
@@ -502,7 +570,8 @@ def _build_overview(
 ) -> None:
     original = note.read_bytes() if note.exists() else (preview_text or "").encode()
     text = original.decode("utf-8-sig")
-    current_ids = {sheet["id"] for sheet in sheet_list(data)}
+    sheets = sheet_list(data)
+    current_ids = {sheet["id"] for sheet in sheets}
     removed_ids = sorted(
         set(re.findall(r"<!-- excel-catalog:begin context-([^ >]+) -->", text))
         - current_ids
@@ -519,7 +588,9 @@ def _build_overview(
             raise ContextError(
                 "Context for a removed sheet was edited or has no matching state; use --force only to replace it intentionally"
             )
-        text = block_pattern(sheet_id).sub("", text, count=1)
+        # Imported context remains useful historical material, even after removal.
+        if saved.get("origin") != "import":
+            text = block_pattern(sheet_id).sub("", text, count=1)
     old = existing_block(text, "workbook")
     state_path = state_dir / "workbook.json"
     state = _read_state(state_path)
@@ -528,26 +599,33 @@ def _build_overview(
             "Workbook overview was edited or has no matching state; use --force only to replace it intentionally"
         )
     connection = resolve_profile(config)
-    plan = generation_plan(connection)
-    prompt = load_prompt(config, stage="workbook")
+    writing = load_context_profile(config, stage="workbook")
+    plan = generation_plan(connection, config=config, stage="workbook")
     needs_sheets = any(item["status"] == "planned" for item in results)
-    retained = any(item["status"] == "retained" for item in results)
     result: dict[str, Any] = {"kind": "workbook", "status": "planned", "notePath": str(note)}
     result["removedSheetIds"] = removed_ids
     results.append(result)
+    # Validate existing blocks and all profiles even on the first dry-run.
+    text, notes, migrations = _collect_context(text, note, data, config, state_dir)
+    names = [item["sheet"] for item in notes]
+    omitted = [sheet["name"] for sheet in sheets if sheet["name"] not in names]
+    stale = [item["sheet"] for item in notes if item["status"] == "stale"]
+    unverified = [item["sheet"] for item in notes if item["status"] == "unverified"]
+    result.update(
+        analyzedSheets=names, omittedSheets=omitted, staleSheets=stale, unverifiedSheets=unverified
+    )
     if dry_run and needs_sheets:
+        result["plannedSheets"] = [sheet["name"] for sheet in selected]
         return
-    names = [sheet["name"] for sheet in selected]
-    omitted = [sheet["name"] for sheet in sheet_list(data) if sheet["name"] not in names]
-    notes = [
-        {"sheet": sheet["name"], "markdown": existing_block(text, sheet["id"]) or ""}
-        for sheet in selected
-    ]
     evidence = {"sheet": "Workbook overview", "notes": notes, "omittedSheets": omitted}
     evidence_payload(evidence, config.max_input_chars)
     key = digest(
         json.dumps(
-            {"evidence": evidence, "prompt": prompt, "config": asdict(config), "bridge": plan},
+            {
+                "evidence": evidence,
+                "profileSha256": writing.sha256,
+                "bridge": plan,
+            },
             sort_keys=True,
         ).encode()
     )
@@ -556,7 +634,7 @@ def _build_overview(
     elif dry_run:
         return
     else:
-        generation_plan(connection, check_executable=True)
+        generation_plan(connection, config=config, stage="workbook", check_executable=True)
         markdown = generate_markdown(
             config,
             evidence,
@@ -571,47 +649,61 @@ def _build_overview(
         if converted:
             result["localLinksConverted"] = len(converted)
             logger.warning(
-                "Converted %d generated local link(s) to plain text; first=%s at line %d. "
-                "Link targets were not logged.",
+                "Converted %d generated local link(s) to plain text; first=%s at line %d. Link targets were not logged.",
                 len(converted),
                 converted[0][1],
                 converted[0][0],
             )
-        heading = "ブック全体の説明" if profile_name(config) == "default-ja" else "Workbook context"
-        scope = json.dumps(names, ensure_ascii=False)
-        omitted_text = json.dumps(omitted, ensure_ascii=False)
+        scope = []
+        for label, values in (
+            ("analyzed", names),
+            ("omitted", omitted),
+            ("stale", stale),
+            ("unverified", unverified),
+        ):
+            if values:
+                scope.append(writing.labels[label] + ": " + json.dumps(values, ensure_ascii=False))
         block = (
-            f"<!-- excel-catalog:begin context-workbook -->\n## {heading}\n\n"
-            f"Analyzed sheets: {scope}\n\nOmitted sheets: {omitted_text}\n\n{markdown}\n"
-            "<!-- excel-catalog:end context-workbook -->"
+            "<!-- excel-catalog:begin context-workbook -->\n"
+            + "## "
+            + writing.labels["heading"]
+            + "\n\n"
+            + markdown
+            + "\n\n"
+            + "\n\n".join(scope)
+            + "\n"
+            + "<!-- excel-catalog:end context-workbook -->"
         )
         newline = "\r\n" if b"\r\n" in original else "\n"
         block = block.replace("\n", newline)
-        if old:
-            text = update_text(text, "workbook", block)
-        else:
-            first = re.search(r"<!-- excel-catalog:begin context-", text)
-            if first:
-                text = text[: first.start()] + block + newline * 2 + text[first.start() :]
-            else:
-                text = update_text(text, "workbook", block)
+        text = update_text(text, "workbook", block)
         state = {
             "buildKey": key,
             "blockSha256": digest(block.replace("\r\n", "\n").encode()),
             "generatedAt": utc_now(),
+            **writing.provenance(),
         }
         result["status"] = "written"
     if dry_run:
         return
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         fingerprint = content_fingerprint(archive)
+    text = arrange_context(text, sheets, load_context_profile(config))
     text = patch_frontmatter(
         text,
         {
-            "contextStatus": "unverified" if retained else "partial" if omitted else "current",
+            "contextStatus": "stale"
+            if stale
+            else "unverified"
+            if unverified
+            else "partial"
+            if omitted
+            else "current",
             "contextSourceFingerprint": fingerprint,
             "contextAnalyzedSheets": names,
             "contextOmittedSheets": omitted,
+            "contextStaleSheets": stale,
+            "contextUnverifiedSheets": unverified,
             "contextGeneratedAt": state["generatedAt"],
         },
     )
@@ -639,6 +731,8 @@ def _build_overview(
             temporary.replace(note)
         finally:
             temporary.unlink(missing_ok=True)
+    for path, saved in migrations.items():
+        atomic_json(path, saved)
     if result["status"] == "written":
         atomic_json(state_path, state)
 
