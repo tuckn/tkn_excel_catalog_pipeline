@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `config show` を `config list` に変更。既定出力を `git config --list` と同様の1行ごとの `key=value` にし、Windows パスをそのままコピーできる表記に統一。
+- `config list --json` で1行の構造化 JSON を出力。読み込んだ設定の版・正規化の有無、値の決定元、既定の生成 profile を両形式で表示。設定確認のログは標準エラーへ出力。
+- 更新後は `uv tool install . --reinstall` を実行し、既存の `config show` 呼び出しを `config list`（JSON 利用時は `config list --json`）に置き換えてください。設定ファイルの変更は不要。
+
 ## 3.3.0 - 2026-10-02
 
 - ノートの処理を現行構成に一本化し、旧本文・Frontmatter・シート見出し・ブック単位抽出欄の自動変換を削除。

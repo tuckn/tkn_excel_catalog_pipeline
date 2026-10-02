@@ -133,6 +133,7 @@ class AppConfig:
     cover: CoverConfig = field(default_factory=CoverConfig)
     default_generator: str | None = None
     generators: dict[str, GeneratorConfig] = field(default_factory=dict)
+    config_details: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
 
 def context_settings(config: ContextConfig) -> dict[str, Any]:

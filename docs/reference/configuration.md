@@ -20,11 +20,26 @@
 補足ファイル（`reference.files`）だけは、その値を書いた設定ファイルのフォルダが基準です。
 
 読み込まれた設定ファイルと、有効な値は次のコマンドで確認できます。
-最初の行に最も優先度の高い設定ファイルのパスを表示し、続けて有効な設定を JSON で表示します。
+`git config --list` と同様、1行に1つの `key=value` を表示します。
+入れ子の項目は `.`、配列は `[0]` などで表し、空の配列・項目は `[]` / `{}`、真偽値は `true` / `false`、未設定値は `null` になります。
+文字列は引用符で囲まず、Windows パスの `\` は重ねません。改行などの制御文字だけエスケープします。
 
 ```shell
-tkn-excel-note config show
+tkn-excel-note config list
+tkn-excel-note config list --json
 ```
+
+`--json` は前置きの説明を付けず、1行の JSON を標準出力に出します。
+どちらの形式でも進捗は標準エラーに `[INFO] Showing resolved configuration` と表示します。`--quiet` はコマンドの前に指定します。
+設定・state・cache・report は作成・更新せず、Bridge の認証情報や補足ファイルの本文も読み取りません。
+
+| 出力項目 | 内容 |
+| --- | --- |
+| `config` | 解決済みの設定。`loadedConfigFiles` に読み込んだファイルを優先順位の順で列挙します。 |
+| `loaded_sources` | 各ファイルの絶対パス、読み込んだ `schema_version`、`effective_schema_version`、読み取り時の正規化の有無（`migrated`）。版が省略された入力は `null` で表示します。 |
+| `winning_sources` | 各設定値の決定元。ファイルの絶対パスまたは `built-in`。配列の各要素も表示します。 |
+| `effective_schema_version` | 内部で使用する設定スキーマ版。ファイルによる上書き対象ではありません。 |
+| `selected_generator` / `selected_prompt_profile` / `selected_bridge_profile` | 既定の生成設定と、その設定が選ぶ profile。source 固有の選択は `config.sources` で確認します。 |
 
 ## コマンドが使う設定
 
@@ -209,7 +224,7 @@ BOM 付きでも読み込めます。
 `text: ""` や `files: []` を書くと、その項目を空にできます。
 未定義の generator 名、未知の項目、型の誤りはエラーになります。
 
-`config show` は補足文の設定を表示しますが、補足ファイルの中身は読み取りません。
+`config list` は補足文の設定を表示しますが、補足ファイルの中身は読み取りません。
 
 ### 画像化と抽出の上限
 
@@ -245,7 +260,7 @@ BOM 付きでも読み込めます。
 
 `profile_dirs` に `C:\path\to\profiles` を指定して `prompt_profile: technical-notes` を選ぶと、`C:\path\to\profiles\technical-notes\` を読み込みます。
 同名のフォルダがなければ、同梱の `default-ja` / `default-en` から探します。
-profile の検証は `--context` を付けた実行で行い、`config show` では行いません。
+profile の検証は `--context` を付けた実行で行い、`config list` では行いません。
 profile のファイル構成と作り方は「[独自の文章 profile を作る](../guides/sheet-content.md#独自の文章-profile-を作る)」を参照してください。
 
 ## 設定ファイルの版

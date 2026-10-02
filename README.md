@@ -354,8 +354,11 @@ Windows のパスは、例のようにシングルクォートで囲みます。
 編集後、読み込まれた設定を確認します。
 
 ```shell
-tkn-excel-note config show
+tkn-excel-note config list
 ```
+
+`config list` は `config.cover.mode=auto` のように1行ずつ表示します。Windows パスはそのままコピーできます。
+JSON が必要な場合は `tkn-excel-note config list --json` を使います。
 
 ほかの設定キーと、設定ファイルの優先順位は「[設定リファレンス](docs/reference/configuration.md)」を参照してください。
 
@@ -480,7 +483,7 @@ tkn-excel-note pull --source workbooks --cover sheet --cover-range "A1:Q50"
 | 目的 | コマンド | 詳細 |
 | --- | --- | --- |
 | ブックまたはフォルダを Markdown に書き出す | `export <ファイルまたはフォルダ> [--context]` | [1つのブックを Markdown にする](#3-1つのブックを-markdown-にする) |
-| 設定ファイルを作成・確認する | `config init` / `config show` | [設定リファレンス](docs/reference/configuration.md) |
+| 設定ファイルを作成・確認する | `config init` / `config list` | [設定リファレンス](docs/reference/configuration.md) |
 | Excel の更新を代理ノートへ取り込む | `pull (--source <id> または --all-sources) [--context]` | [最初の取り込み](#42-最初の取り込み) |
 | Frontmatter の編集を Excel へ反映する | `push --source <id> [--note <ノート>]` | [Frontmatter の変更を Excel に反映する](#44-frontmatter-の変更を-excel-に反映する) |
 | 同期の状況を確認する（変更なし） | `status --source <id>` | [同期の仕様](docs/reference/synchronization.md#状態と次の操作) |
@@ -502,6 +505,7 @@ tkn-excel-note pull --source workbooks --cover sheet --cover-range "A1:Q50"
 ## 6. 実行結果の読み方
 
 処理の進捗は標準エラー出力に、処理結果は標準出力に1行の JSON で出力します。
+`config list` は既定で1行ごとの `key=value` を表示し、`--json` で JSON に切り替えます。
 スクリプトから利用する場合は、標準出力の JSON と終了コードで結果を判定できます。
 
 | 終了コード | 意味 |

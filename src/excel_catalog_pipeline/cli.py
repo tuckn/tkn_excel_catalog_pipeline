@@ -15,6 +15,7 @@ from typing import Any
 from . import __version__
 from .ai_pull import run_ai_pull, usage_totals
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
+from .config_display import config_lines
 from .context import run_context
 from .context_source import ContextError
 from .cover_settings import validate_cover
@@ -200,14 +201,16 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     config_parser = commands.add_parser("config", help="Create or inspect configuration.")
     config_commands = config_parser.add_subparsers(dest="config_command", required=True)
-    config_commands.add_parser(
-        "show",
-        help="Print the active config file path, then the resolved configuration as indented JSON.",
+    config_list = config_commands.add_parser(
+        "list",
+        help="List resolved settings and winning sources as key=value lines.",
         description=(
-            "Print the highest-priority loaded config file's full path, then the resolved "
-            "non-secret configuration as indented JSON. If no file is loaded, show built-in defaults."
+            "List resolved non-secret settings, loaded config files, winning sources and schema "
+            "versions as key=value lines. Does not create or update files. "
+            "Use --json for a structured JSON result."
         ),
     )
+    config_list.add_argument("--json", action="store_true", help="Print one compact JSON result.")
     config_init = config_commands.add_parser(
         "init",
         help="Create the user-global config from the packaged template.",
@@ -695,19 +698,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         config = load_config(explicit=args.config)
         if args.command == "config":
-            active_path = str(config.loaded_files[-1].absolute()) if config.loaded_files else None
-            print(f"Config file: {active_path or '(none; using built-in defaults)'}\n")
-            print(
-                json.dumps(
-                    {
-                        "status": "success",
-                        "command": "config show",
-                        "config": config_as_dict(config),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            result = {
+                "status": "success",
+                "command": "config list",
+                "config": config_as_dict(config),
+                **config.config_details,
+            }
+            logger.info("Showing resolved configuration")
+            if args.json:
+                _emit(result)
+            else:
+                print("\n".join(config_lines(result)))
             return 0
         if args.command == "export":
             _check_generation_options(args)

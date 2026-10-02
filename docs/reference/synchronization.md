@@ -159,7 +159,7 @@ tkn-excel-note adopt --source workbooks
 `push` は、最初に入力フォルダとノートの設定を表示し、ノート名とブックの相対パスで結果を表示します。
 変更のなかった対象（`unchanged`）は個別に表示せず、最後の集計に件数だけを出します。
 
-標準出力には、コマンドの結果を JSON で出力します。
+標準出力には、コマンドの結果を JSON で出力します。`config list` の既定出力は1行ごとの `key=value` です。
 
 | コマンド | 標準出力 | 保存するもの |
 | --- | --- | --- |
@@ -167,7 +167,7 @@ tkn-excel-note adopt --source workbooks
 | `--dry-run` 付きの各コマンド | 1行の JSON | なし |
 | `export` | 1行の JSON | なし（AI の使用量の記録を除く） |
 | `config init` / `workbook list-sheets` | 1行の JSON | `config init` は設定ファイル。`workbook list-sheets` は読み取りのみ |
-| `config show` | 設定ファイルのパスと、インデント付きの JSON | なし |
+| `config list` | 1行ごとの `key=value`（`--json` で1行の JSON） | なし |
 
 `pull --context` の結果 JSON には、その実行の AI の使用量（`usage`）が含まれます。
 シートごとの生成・再利用の結果は、レポートの `details.json` に記録します。

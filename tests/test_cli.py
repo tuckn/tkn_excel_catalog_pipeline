@@ -122,22 +122,19 @@ def test_mutating_command_help_explains_normal_write_and_dry_run(capsys) -> None
     assert "Deprecated compatibility option" in captured.out
 
 
-def test_config_show_prints_path_before_indented_json(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "user.yaml")
+def test_config_list_prints_compact_json_without_header(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     config = tmp_path / "config.yaml"
     config.write_text("schema_version: 1\nsources: {}\n", encoding="utf-8")
-    result = main(["--config", "config.yaml", "config", "show"])
+    result = main(["--config", "config.yaml", "config", "list", "--json"])
     captured = capsys.readouterr()
     assert result == 0
-    header, body = captured.out.split("\n\n", 1)
-    assert header == f"Config file: {config.resolve()}"
-    payload = json.loads(body)
-    assert payload["command"] == "config show"
+    payload = json.loads(captured.out)
+    assert payload["command"] == "config list"
     assert payload["config"]["loadedConfigFiles"] == [str(config.resolve())]
     assert payload["config"]["sources"] == {}
-    assert '\n  "config": {\n    "schema_version": "2.1.0",' in body
-    assert captured.err == ""
+    assert len(captured.out.splitlines()) == 1
+    assert "[INFO] Showing resolved configuration" in captured.err
+    assert "[SUCCESS]" not in captured.err
 
 
 def test_config_init_creates_user_config(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -627,7 +624,7 @@ def test_cli_adopt_dry_run_lists_targets_without_report(
     assert not (tmp_path / "reports").exists()
 
 
-def test_config_show_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+def test_config_list_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config_module, "global_config_path", lambda: tmp_path / "absent")
     config = tmp_path / "config.yaml"
@@ -635,15 +632,15 @@ def test_config_show_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> No
         "sources:\n  example:\n    id:\n    path: input\n    notes: {root: output}\n",
         encoding="utf-8",
     )
-    assert main(["--config", str(config), "config", "show"]) == 0
+    assert main(["--config", str(config), "config", "list", "--json"]) == 0
     captured = capsys.readouterr()
-    payload = json.loads(captured.out.split("\n\n", 1)[1])
+    payload = json.loads(captured.out)
     assert list(payload["config"]["sources"]) == ["example"]
     assert "id" not in payload["config"]["sources"]["example"]
     assert "workbooks_dir" in payload["config"]["sources"]["example"]
     assert "path" not in payload["config"]["sources"]["example"]
     assert "dir" in payload["config"]["sources"]["example"]["notes"]
-    assert captured.err == ""
+    assert "[INFO] Showing resolved configuration" in captured.err
 
 
 @pytest.mark.parametrize("options", [[], ["--context"], ["--dry-run"], ["--context", "--force"]])

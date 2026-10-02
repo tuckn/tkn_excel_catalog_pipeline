@@ -6,7 +6,7 @@ import re
 import uuid
 from contextlib import suppress
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, cast
@@ -15,6 +15,7 @@ import yaml
 from pydantic import TypeAdapter, ValidationError
 from tkn_genai_bridge import Profile
 
+from .config_display import config_leaves
 from .cover_settings import validate_cover
 from .models import (
     AppConfig,
@@ -237,7 +238,8 @@ def _generation_settings(raw: dict[str, Any], where: str = "generation") -> dict
             TypeAdapter(field.rebuild_annotation()).validate_python(value, strict=True)
         except ValidationError:
             raise ConfigError(f"Invalid {where}.overrides.{key}") from None
-    values["overrides"] = overrides
+    if "overrides" in values:
+        values["overrides"] = overrides
     if "generators" in values:
         generators = values["generators"]
         if not isinstance(generators, dict):
@@ -348,6 +350,30 @@ def _normalize_layer(data: dict[str, Any], *, base_dir: Path | None = None) -> d
     return values
 
 
+def _record_origins(
+    base: dict[str, Any],
+    overlay: dict[str, Any],
+    origins: dict[str, str],
+    origin: str,
+    prefix: str = "",
+) -> None:
+    """Follow the same mapping merge and sources/list replacement rules as values."""
+    for key, value in overlay.items():
+        path = f"{prefix}.{key}" if prefix else key
+        previous = base.get(key)
+        if key != "sources" and isinstance(value, dict) and isinstance(previous, dict):
+            if value:
+                origins.pop(path, None)
+                _record_origins(previous, value, origins, origin, path)
+            elif not previous:
+                origins[path] = origin
+        else:
+            for old in list(origins):
+                if old == path or old.startswith((path + ".", path + "[")):
+                    del origins[old]
+            origins.update(dict.fromkeys(config_leaves(value, path), origin))
+
+
 def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> AppConfig:
     cwd = (cwd or Path.cwd()).resolve()
     candidates = [global_config_path(), cwd / ".tkn" / "config.yaml"]
@@ -356,16 +382,49 @@ def load_config(*, explicit: Path | None = None, cwd: Path | None = None) -> App
 
     merged = deepcopy(DEFAULT_CONFIG)
     loaded: list[Path] = []
+    loaded_sources: list[dict[str, Any]] = []
+    origins = dict.fromkeys(config_leaves(DEFAULT_CONFIG), "built-in")
     for path in candidates:
         if path.exists():
-            layer = _normalize_layer(_read_yaml(path), base_dir=path.parent)
+            raw = _read_yaml(path)
+            layer = _normalize_layer(raw, base_dir=path.parent)
             validate_config(_deep_merge(DEFAULT_CONFIG, layer), check_generator_links=False)
+            source_items = raw.get("sources", {})
+            legacy_items = source_items if isinstance(source_items, list) else source_items.values()
+            migrated = raw.get("schema_version") != SCHEMA_VERSION or isinstance(source_items, list)
+            migrated = migrated or any(
+                "path" in item or "root" in item.get("notes", {}) for item in legacy_items
+            )
+            loaded_sources.append({
+                "path": str(path.absolute()),
+                "schema_version": raw.get("schema_version"),
+                "effective_schema_version": SCHEMA_VERSION,
+                "migrated": migrated,
+            })
+            # Schema versions describe individual inputs; they are not overrideable settings.
+            layer.pop("schema_version")
+            if "sources" in layer:
+                layer["sources"] = _source_items(layer["sources"])
+            _record_origins(merged, layer, origins, str(path.absolute()))
             merged = _deep_merge(merged, layer)
             loaded.append(path)
         elif explicit is not None and path == explicit.expanduser().resolve():
             raise ConfigError(f"Explicit config not found: {path}")
 
-    return validate_config(merged, loaded_files=tuple(loaded))
+    config = validate_config(merged, loaded_files=tuple(loaded))
+    resolved = config_as_dict(config)
+    resolved.pop("loadedConfigFiles")
+    selected = config.generators.get(config.default_generator or "")
+    return replace(config, config_details={
+        "loaded_sources": loaded_sources,
+        "effective_schema_version": SCHEMA_VERSION,
+        "winning_sources": {
+            key: origins.get(key, "built-in") for key in config_leaves(resolved)
+        },
+        "selected_generator": config.default_generator,
+        "selected_prompt_profile": selected.prompt_profile if selected else config.context.prompt_profile,
+        "selected_bridge_profile": selected.bridge_profile if selected else config.context.bridge_profile,
+    })
 
 
 def validate_config(
