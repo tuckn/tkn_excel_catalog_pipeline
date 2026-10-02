@@ -227,9 +227,9 @@ def test_source_commands_require_explicit_source(command, monkeypatch):
 
 @pytest.mark.parametrize(
     "arguments",
-    [["pull", "book.xlsx", "--source", "library"], ["push", "book.xlsx.md", "--source", "library"]],
+    [["push", "book.xlsx.md", "--source", "library"]],
 )
-def test_sync_commands_reject_direct_paths(arguments):
+def test_push_rejects_direct_paths(arguments):
     with pytest.raises(SystemExit) as error:
         cli.build_parser().parse_args(arguments)
     assert error.value.code == 2

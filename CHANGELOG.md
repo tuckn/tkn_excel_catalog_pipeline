@@ -6,6 +6,11 @@
 - `config list --json` で1行の構造化 JSON を出力。読み込んだ設定の版・正規化の有無、値の決定元、既定の生成 profile を両形式で表示。設定確認のログは標準エラーへ出力。
 - 更新後は `uv tool install . --reinstall` を実行し、既存の `config show` 呼び出しを `config list`（JSON 利用時は `config list --json`）に置き換えてください。設定ファイルの変更は不要。
 
+## 3.3.1 - 2026-10-03
+
+- `pull --source <id> "example.xlsx"` でsource内の1ブックを選択可能に。`--sheet`・`--context`・cover・`--dry-run` と組み合わせ、既存の代理ノートと同期記録を引き継ぐ。
+- 相対パスをsourceの `workbooks_dir` 基準で解決し、範囲外・除外・存在しないブックと `--all-sources` の併用を実行前に拒否。選択外のノート・同期記録を保持。
+
 ## 3.3.0 - 2026-10-02
 
 - ノートの処理を現行構成に一本化し、旧本文・Frontmatter・シート見出し・ブック単位抽出欄の自動変換を削除。

@@ -50,6 +50,8 @@ tkn-excel-note config list --json
 | `push`、`status`、`adopt`、`delete-notes` | `sources` |
 
 `pull` は `--source <id>` または `--all-sources` のどちらかが必須です。`--all-sources` は登録済みのすべての source を処理します。
+`pull --source <id> "example.xlsx"` で1ブックに限定できます。相対パスは `workbooks_dir` が基準で、配下の絶対パスも使えます。
+ファイルは `recursive`・`include`・`ignore` の対象範囲内に限ります。`--all-sources` との併用はできません。
 `push`、`status`、`adopt`、`delete-notes` には `--source <id>` が必須です。
 
 ## source の設定

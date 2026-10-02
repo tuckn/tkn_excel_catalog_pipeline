@@ -643,7 +643,7 @@ def test_config_list_uses_source_keys(monkeypatch, tmp_path: Path, capsys) -> No
     assert "[INFO] Showing resolved configuration" in captured.err
 
 
-@pytest.mark.parametrize("options", [[], ["--context"], ["--dry-run"], ["--context", "--force"]])
+@pytest.mark.parametrize("options", [[], ["book.xlsx"], ["--context"], ["--dry-run"], ["--context", "--force"]])
 def test_pull_requires_target_before_config_or_execution(monkeypatch, capsys, options):
     def forbidden(*args, **kwargs):
         raise AssertionError("No config, scanning, AI, or writes allowed")
@@ -663,7 +663,7 @@ def test_pull_requires_target_before_config_or_execution(monkeypatch, capsys, op
     [
         ["--source", "one", "--all-sources"],
         ["book.xlsx", "--all-sources"],
-        ["book.xlsx", "--source", "one"],
+        ["book.xlsx", "other.xlsx", "--source", "one"],
         ["--all-sources", "--output", "note.md"],
     ],
 )
@@ -794,3 +794,119 @@ def test_pull_all_sources_requires_configured_sources(monkeypatch, capsys):
     assert main(["pull", "--all-sources"]) == 3
     captured = capsys.readouterr()
     assert json.loads(captured.out)["status"] == "config-error"
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("absolute", [False, True])
+def test_pull_one_workbook_preserves_other_notes_and_state(
+    monkeypatch, tmp_path, capsys, dry_run, absolute
+):
+    import zipfile
+
+    from excel_catalog_pipeline.config import DEFAULT_CONFIG, validate_config
+    from excel_catalog_pipeline.state import load_state
+    from tests.test_context import rewrite_package
+
+    root = tmp_path / "books"
+    book = create_workbook(root / "nested" / "selected.xlsx")
+    other = create_workbook(root / "other.xlsx")
+    notes = tmp_path / "notes"
+    state = tmp_path / "state.json"
+    config = validate_config(
+        {
+            **DEFAULT_CONFIG,
+            "sources": {
+                "library": {
+                    "workbooks_dir": str(root),
+                    "recursive": True,
+                    "notes": {"dir": str(notes)},
+                }
+            },
+        }
+    )
+    monkeypatch.setattr(cli_module, "load_config", lambda **kwargs: config)
+    monkeypatch.setattr(pipeline_module, "state_path", lambda: state)
+    assert main(["--report-dir", str(tmp_path / "initial-reports"), "pull", "--source", "library"]) == 0
+    capsys.readouterr()
+    original_state = load_state(state)
+    selected_note = notes / "nested" / "selected.xlsx.md"
+    original_note = selected_note.read_bytes()
+    other_note = notes / "other.xlsx.md"
+    original_other_note = other_note.read_bytes()
+    # Keep the unselected synthetic workbook outside the source to check missing-source scope.
+    other.rename(tmp_path / "other.xlsx")
+    with zipfile.ZipFile(book) as archive:
+        core = archive.read("docProps/core.xml").replace(b"Example title", b"Updated title")
+    book.write_bytes(rewrite_package(book.read_bytes(), {"docProps/core.xml": core}))
+    original_book = book.read_bytes()
+    reports = tmp_path / "selected-reports"
+    selector = str(book) if absolute else "nested/selected.xlsx"
+    assert main(
+        ["--report-dir", str(reports), "pull", "--source", "library", selector]
+        + (["--dry-run"] if dry_run else [])
+    ) == 0
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert len(captured.out.splitlines()) == 1
+    assert result["statusCounts"] == {"would-update" if dry_run else "updated": 1}
+    assert book.read_bytes() == original_book
+    assert other_note.read_bytes() == original_other_note
+    current_state = load_state(state)
+    for key, entry in original_state["entries"].items():
+        if entry["currentPath"] == "other.xlsx":
+            assert current_state["entries"][key] == entry
+    if dry_run:
+        assert current_state == original_state
+        assert selected_note.read_bytes() == original_note
+        assert not reports.exists()
+    else:
+        from excel_catalog_pipeline.adapters.markdown import read_note
+
+        assert read_note(selected_note).frontmatter["title"] == "Updated title"
+        details = json.loads((Path(result["reportPath"]) / "details.json").read_text(encoding="utf-8"))
+        assert [item["sourcePath"] for item in details] == ["nested/selected.xlsx"]
+
+
+@pytest.mark.parametrize(
+    "selector,settings,message",
+    [
+        ("../outside.xlsx", {}, "inside the selected source root"),
+        ("missing.xlsx", {}, "existing .xlsx or .xlsm"),
+        ("book.xlsx", {"ignore": ["book.xlsx"]}, "excluded"),
+        ("book.xlsx", {"include": ["*.xlsm"]}, "excluded"),
+        ("nested/book.xlsx", {}, "excluded"),
+        ("~$book.xlsx", {}, "excluded"),
+    ],
+)
+def test_pull_workbook_validates_scope_before_execution(
+    monkeypatch, tmp_path, capsys, selector, settings, message
+):
+    from excel_catalog_pipeline.config import DEFAULT_CONFIG, validate_config
+
+    root = tmp_path / "books"
+    for name in ("book.xlsx", "nested/book.xlsx", "~$book.xlsx"):
+        create_workbook(root / name)
+    create_workbook(tmp_path / "outside.xlsx")
+    config = validate_config(
+        {
+            **DEFAULT_CONFIG,
+            "sources": {
+                "library": {
+                    "workbooks_dir": str(root),
+                    "notes": {"dir": str(tmp_path / "notes")},
+                    **settings,
+                }
+            },
+        }
+    )
+    monkeypatch.setattr(cli_module, "load_config", lambda **kwargs: config)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid workbook must fail before scanning, generation, or writes")
+
+    for name in ("run_pull", "run_ai_pull", "write_report"):
+        monkeypatch.setattr(cli_module, name, forbidden)
+    assert main(["pull", "--source", "library", selector, "--context"]) == 3
+    result = json.loads(capsys.readouterr().out)
+    assert message in result["message"]
+    assert not (tmp_path / "notes").exists()

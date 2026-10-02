@@ -482,3 +482,30 @@ def test_plain_refresh_keeps_reviewed_context_and_updates_sheet_local_text(setup
     assert updated.index("### Data") < updated.index("- 43") < updated.index("### Second")
     assert pull(book, None, "--context", "--sheet", "Second") == 1
     assert output.read_text(encoding="utf-8") == updated
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_pull_selected_workbook_and_sheet_only(setup, capsys, dry_run):
+    config, book, output, calls = setup
+    other = create_workbook(book.parent / "other.xlsx")
+    add_second_sheet(book)
+    before = book.read_bytes()
+    other_before = other.read_bytes()
+
+    assert cli.main(
+        ["pull", "--source", "library", book.name, "--sheet", "Data", "--context"]
+        + (["--dry-run"] if dry_run else [])
+    ) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["statusCounts"] == {"would-create" if dry_run else "created": 1}
+    assert book.read_bytes() == before and other.read_bytes() == other_before
+    assert not (output.parent / "other.xlsx.md").exists()
+    if dry_run:
+        assert not calls and not output.exists() and not paths.app_root().exists()
+        assert result["usage"]["calls"] == 0
+    else:
+        note = read_note(output)
+        assert note.frontmatter["contextAnalyzedSheets"] == ["Data"]
+        assert note.frontmatter["contextStatus"] == "partial"
+        assert [stage for stage, _ in calls] == ["sheet", "workbook"]
+        assert note.frontmatter["sourceRoot"] == config.sources[0].id

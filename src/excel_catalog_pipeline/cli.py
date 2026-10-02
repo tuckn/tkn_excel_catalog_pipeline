@@ -16,7 +16,7 @@ from . import __version__
 from .ai_pull import run_ai_pull, usage_totals
 from .config import ConfigError, config_as_dict, init_user_config, load_config, select_sources
 from .config_display import config_lines
-from .context import run_context
+from .context import resolve_workbook, run_context
 from .context_source import ContextError
 from .cover_settings import validate_cover
 from .deletion import run_delete_notes
@@ -234,6 +234,11 @@ def build_parser() -> argparse.ArgumentParser:
             "synchronization state; use --dry-run for a read-only preview. "
             "Select one configured source with --source ID or all configured sources with --all-sources."
         ),
+    )
+    pull.add_argument(
+        "workbook",
+        nargs="?",
+        help="Limit pull to one workbook inside --source; path relative to workbooks_dir or absolute.",
     )
     pull.add_argument(
         "--cover",
@@ -680,6 +685,8 @@ def _log_status_results(
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "pull" and args.workbook and args.all_sources:
+        parser.error("A workbook path requires --source and cannot be combined with --all-sources")
     logger = configure_logging(
         quiet=args.quiet,
         verbose=args.verbose,
@@ -769,6 +776,10 @@ def main(argv: list[str] | None = None) -> int:
             sources = select_sources(config, args.source)
         if not sources:
             raise ConfigError("Configure the selected source before synchronization")
+        if args.command == "pull" and args.workbook:
+            source = sources[0]
+            workbook_path = resolve_workbook(source, args.workbook, config.context)
+            sources = (replace(source, single_workbook=workbook_path),)
         if args.command == "workbook":
             if args.report_dir:
                 logger.warning("--report-dir does not apply to workbook list-sheets.")

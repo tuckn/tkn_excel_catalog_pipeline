@@ -47,7 +47,10 @@ def digest(data: bytes) -> str:
 
 
 def resolve_workbook(source: SourceConfig, selector: str, config: ContextConfig) -> Path:
-    candidate = Path(selector).expanduser()
+    candidate = Path(selector)
+    if candidate.name.startswith("~$"):
+        raise ContextError("Workbook is excluded by the selected source configuration")
+    candidate = candidate.expanduser()
     path = (candidate if candidate.is_absolute() else source.path / candidate).resolve()
     try:
         relative = path.relative_to(source.path.resolve()).as_posix()

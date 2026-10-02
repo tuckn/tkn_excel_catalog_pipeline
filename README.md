@@ -388,6 +388,15 @@ tkn-excel-note pull --source workbooks --context
 ```
 
 `pull` は `--source <id>` または `--all-sources` のどちらかを指定します。併用はできません。
+source 内の1ブックだけを取り込む場合は、ファイル名を指定します。
+相対パスは `workbooks_dir` が基準です。配下の絶対パスも使えます。
+`recursive`・`include`・`ignore` の設定は引き続き適用します。ファイル指定は `--all-sources` と併用できません。
+
+```shell
+tkn-excel-note pull --source workbooks "example.xlsx" --dry-run
+tkn-excel-note pull --source workbooks "example.xlsx" --sheet "概要" --context
+```
+
 登録済みのすべての source をまとめて取り込む場合は、次のように実行します。
 `--context` や cover のオプションも組み合わせられます。
 

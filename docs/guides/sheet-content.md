@@ -92,6 +92,8 @@ Excel の起動、AI の認証と呼び出し、ファイルの保存は行い�
 
 `pull --source <id> --context --sheet <名前>` は、source のすべてのブックに同じシート名の選択を適用します。
 その名前のシートがないブックはエラーになります。
+1ブックの特定シートだけを更新する場合は、`pull --source <id> "example.xlsx" --sheet <名前> --context` と指定します。
+ファイルの相対パスは source の `workbooks_dir` が基準です。
 
 ## 補足文を渡す
 
